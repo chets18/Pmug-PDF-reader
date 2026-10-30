@@ -1,0 +1,26 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.example.piper-debug-3:/values_values.arsc.flat",
+            "map": [
+                {
+                    "source": "/home/chetraj/Downloads/pmug(2)/piper/src/main/res/values/strings.xml",
+                    "from": {
+                        "startLines": "0",
+                        "startColumns": "11",
+                        "startOffsets": "11",
+                        "endColumns": "75",
+                        "endOffsets": "75"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "68",
+                        "endOffsets": "119"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pmug",
+  "description": "PDF + mug, said smugly. Synchronized text-to-speech reading with animated steam mascot, real page previews, and intelligent reading nudges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
