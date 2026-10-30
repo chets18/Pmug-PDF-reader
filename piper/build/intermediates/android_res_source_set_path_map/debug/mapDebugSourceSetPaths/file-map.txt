@@ -1,7 +1,0 @@
-com.example.piper-pngs-0 /home/chetraj/Downloads/pmug(2)/piper/build/generated/res/pngs/debug
-com.example.piper-updated_navigation_xml-1 /home/chetraj/Downloads/pmug(2)/piper/build/generated/updated_navigation_xml/debug
-com.example.piper-packageDebugResources-2 /home/chetraj/Downloads/pmug(2)/piper/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-com.example.piper-packageDebugResources-3 /home/chetraj/Downloads/pmug(2)/piper/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-com.example.piper-debug-4 /home/chetraj/Downloads/pmug(2)/piper/build/intermediates/merged_res/debug/mergeDebugResources
-com.example.piper-debug-5 /home/chetraj/Downloads/pmug(2)/piper/src/debug/res
-com.example.piper-main-6 /home/chetraj/Downloads/pmug(2)/piper/src/main/res
