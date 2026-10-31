@@ -7,8 +7,6 @@ import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.os.Build
-import com.example.domain.tts.SynthesizedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -18,7 +16,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
-/** Optional local neural TTS with continuous AudioTrack streaming and paragraph pipeline. */
+/** Multi-voice Piper TTS engine supporting voice switching, model reloading, and streaming. */
 class PiperTtsEngine(context: Context) : TtsEngine {
 
     private val appContext = context.applicationContext
@@ -42,12 +40,37 @@ class PiperTtsEngine(context: Context) : TtsEngine {
     @Volatile private var framesSubmitted = 0L
     private var lastChunkEndTime: Long = 0L
 
+    var currentVoiceId: String = PiperVoiceCatalog.defaultVoiceId
+        private set
+
     override val isInitialized: Boolean
         get() = tts != null
 
     override fun setListener(listener: TtsEngineListener) {
         this.listener = listener
         if (isInitialized) mainHandler.post { listener.onEngineReady() }
+    }
+
+    override fun setVoice(voiceId: String) {
+        if (currentVoiceId == voiceId && tts != null) return
+        stop()
+        worker.execute {
+            synchronized(synthesisLock) {
+                try {
+                    tts?.release()
+                } catch (_: Throwable) {}
+                tts = null
+                currentVoiceId = voiceId
+                try {
+                    getOrCreateEngine()
+                    Log.i(TAG, "Switched and loaded voice id=$voiceId")
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Failed to load voice id=$voiceId, falling back to default", e)
+                    currentVoiceId = PiperVoiceCatalog.defaultVoiceId
+                    getOrCreateEngine()
+                }
+            }
+        }
     }
 
     fun synthesizeAudio(text: String, rate: Float): SynthesizedAudio {
@@ -61,7 +84,6 @@ class PiperTtsEngine(context: Context) : TtsEngine {
         val sampleRate = if (audio.sampleRate > 0) audio.sampleRate else 22050
         val samples = audio.samples ?: floatArrayOf()
         val audioDurationMs = if (sampleRate > 0) (samples.size * 1000L / sampleRate) else 0L
-        val rtf = if (audioDurationMs > 0) synthTimeMs.toFloat() / audioDurationMs.toFloat() else 0f
 
         // Trim near-silence
         var startIdx = 0
@@ -73,10 +95,7 @@ class PiperTtsEngine(context: Context) : TtsEngine {
             endIdx--
         }
         val trimmed = if (startIdx <= endIdx) samples.copyOfRange(startIdx, endIdx + 1) else floatArrayOf()
-        val finalAudioDurationMs = if (sampleRate > 0) (trimmed.size * 1000L / sampleRate) else audioDurationMs
-
-        Log.i(TAG, "PmugTts: [Synthesize] synthMs=$synthTimeMs audioMs=$finalAudioDurationMs rtf=$rtf")
-        return SynthesizedAudio(trimmed, sampleRate, rtf)
+        return SynthesizedAudio(trimmed, sampleRate, 0f)
     }
 
     fun warmUp() {
@@ -115,8 +134,6 @@ class PiperTtsEngine(context: Context) : TtsEngine {
 
                 val sampleRate = if (audio.sampleRate > 0) audio.sampleRate else 22050
                 val samples = audio.samples ?: floatArrayOf()
-                val audioDurationMs = if (sampleRate > 0) (samples.size * 1000L / sampleRate) else 0L
-                val rtf = if (audioDurationMs > 0) synthTimeMs.toFloat() / audioDurationMs.toFloat() else 0f
 
                 // Trim near-silence
                 var startIdx = 0
@@ -128,18 +145,9 @@ class PiperTtsEngine(context: Context) : TtsEngine {
                     endIdx--
                 }
                 val trimmed = if (startIdx <= endIdx) samples.copyOfRange(startIdx, endIdx + 1) else floatArrayOf()
-                val leadingSilenceMs = if (sampleRate > 0) (startIdx * 1000L / sampleRate) else 0L
-                val trailingSilenceMs = if (sampleRate > 0) ((samples.size - 1 - endIdx) * 1000L / sampleRate) else 0L
-
-                val finalSamples = trimmed
-                System.arraycopy(trimmed, 0, finalSamples, 0, trimmed.size)
-
-                val finalAudioDurationMs = if (sampleRate > 0) (finalSamples.size * 1000L / sampleRate) else audioDurationMs
-
-                Log.i(TAG, "PmugTts: chunkId=$sentenceId synthStart=$synthStart synthEnd=$synthEnd synthTimeMs=$synthTimeMs audioDurationMs=$finalAudioDurationMs rtf=$rtf leadingSilenceTrimmedMs=$leadingSilenceMs trailingSilenceTrimmedMs=$trailingSilenceMs audioTrackObjectsCreated=$audioTrackObjectsCreatedCount")
 
                 mainHandler.post {
-                    playOrStreamSamples(sentenceId, generation, finalSamples, sampleRate)
+                    playOrStreamSamples(sentenceId, generation, trimmed, sampleRate)
                 }
             } catch (error: Throwable) {
                 Log.e(TAG, "Piper synthesize failed sentenceId=$sentenceId", error)
@@ -154,14 +162,6 @@ class PiperTtsEngine(context: Context) : TtsEngine {
 
     private fun playOrStreamSamples(sentenceId: Int, generation: Long, samples: FloatArray, sampleRate: Int) {
         if (generation != requestGeneration.get() || isClosed) return
-
-        val playbackStartTime = System.currentTimeMillis()
-        val gapMs = if (lastChunkEndTime > 0) playbackStartTime - lastChunkEndTime else 0L
-        if (gapMs > 250L) {
-            Log.w(TAG, "PmugTts: Underrun warning! Gap between chunks was ${gapMs}ms (queue starved)")
-        }
-
-        Log.i(TAG, "PmugTts: playbackStartTime=$playbackStartTime gapMs=$gapMs queueDepth=1")
 
         val track = getOrCreateAudioTrack(sampleRate)
         if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
@@ -211,21 +211,20 @@ class PiperTtsEngine(context: Context) : TtsEngine {
                 pendingMarkerSentenceId = -1
                 lastChunkEndTime = System.currentTimeMillis()
                 if (completedId >= 0) listener?.onSentenceCompleted(completedId)
-                Log.i(TAG, "PmugTts: playbackEndTime=$lastChunkEndTime chunkId=$completedId")
             }
             override fun onPeriodicNotification(track: AudioTrack) = Unit
         }, mainHandler)
         audioTrackObjectsCreatedCount++
         audioTrack = track
-        Log.i(TAG, "PmugTts: Created long-lived AudioTrack object count=$audioTrackObjectsCreatedCount sampleRate=$sampleRate")
         return track
     }
 
-    fun install(progress: (Int) -> Unit, complete: (Result<Unit>) -> Unit) {
+    fun install(voiceId: String, progress: (Int) -> Unit, complete: (Result<Unit>) -> Unit) {
         worker.execute {
             val result = try {
-                modelInstaller.ensureInstalled { progress(it) }
-                getOrCreateEngine()
+                val voice = PiperVoiceCatalog.getVoice(voiceId)
+                modelInstaller.ensureInstalled(voice) { progress(it) }
+                setVoice(voiceId)
                 Result.success(Unit)
             } catch (error: Throwable) {
                 Result.failure(error)
@@ -234,11 +233,12 @@ class PiperTtsEngine(context: Context) : TtsEngine {
         }
     }
 
-    fun isVoiceInstalled(): Boolean = modelInstaller.isInstalled()
+    fun isVoiceInstalled(voiceId: String): Boolean = modelInstaller.isInstalled(voiceId)
 
     private fun getOrCreateEngine(): OfflineTts {
         tts?.let { return it }
-        val model = modelInstaller.ensureInstalled()
+        val voice = PiperVoiceCatalog.getVoice(currentVoiceId)
+        val model = modelInstaller.ensureInstalled(voice)
         try {
             System.loadLibrary("sherpa-onnx-jni")
         } catch (_: Throwable) {}
@@ -263,7 +263,8 @@ class PiperTtsEngine(context: Context) : TtsEngine {
 
     fun runSelfTest(report: (String, Boolean, String) -> Unit) {
         try {
-            val model = modelInstaller.ensureInstalled()
+            val voice = PiperVoiceCatalog.getVoice(currentVoiceId)
+            modelInstaller.ensureInstalled(voice)
             System.loadLibrary("sherpa-onnx-jni")
             val engine = getOrCreateEngine()
             val audio = engine.generate("Piper diagnostic test.", sid = 0, speed = 1.0f)
@@ -305,13 +306,15 @@ class PiperTtsEngine(context: Context) : TtsEngine {
         audioWriter.shutdownNow()
     }
 
-    fun deleteDownloadedVoice(onComplete: (Boolean) -> Unit = {}) {
+    fun deleteVoice(voiceId: String, onComplete: (Boolean) -> Unit = {}) {
         stop()
         worker.execute {
             val deleted = try {
-                tts?.release()
-                tts = null
-                modelInstaller.deleteDownloadedModel()
+                if (currentVoiceId == voiceId) {
+                    tts?.release()
+                    tts = null
+                }
+                modelInstaller.deleteVoice(voiceId)
             } catch (_: Throwable) {
                 false
             }
@@ -319,17 +322,31 @@ class PiperTtsEngine(context: Context) : TtsEngine {
         }
     }
 
-    override fun getAvailableVoices(): List<VoiceOption> = listOf(
-        VoiceOption(
-            id = TtsProviderMode.PIPER_OFFLINE.voiceId,
-            name = TtsProviderMode.PIPER_OFFLINE.displayName,
-            locale = "English (US)",
-            isNetworkConnectionRequired = true,
-            quality = "Medium; downloaded once, then offline"
-        )
-    )
+    fun deleteDownloadedVoice(onComplete: (Boolean) -> Unit = {}) {
+        stop()
+        worker.execute {
+            val deleted = try {
+                tts?.release()
+                tts = null
+                modelInstaller.deleteAllVoices()
+            } catch (_: Throwable) {
+                false
+            }
+            mainHandler.post { onComplete(deleted) }
+        }
+    }
 
-    override fun setVoice(voiceId: String) = Unit
+    override fun getAvailableVoices(): List<VoiceOption> {
+        return PiperVoiceCatalog.voices.map { v ->
+            VoiceOption(
+                id = v.id,
+                name = v.displayName,
+                locale = "English (${v.accent})",
+                isNetworkConnectionRequired = true,
+                quality = "${v.quality.replaceFirstChar { it.uppercase() }}; ${if (modelInstaller.isInstalled(v.id)) "Downloaded" else "Not downloaded (~${v.expectedDownloadSize / (1024*1024)}MB)"}"
+            )
+        }
+    }
 
     private companion object {
         const val TAG = "PmugPiper"

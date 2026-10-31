@@ -74,14 +74,19 @@ class HybridTtsEngine(
         piperEngine.remove(onComplete)
     }
 
-    fun preparePiper(progress: (Int) -> Unit, onComplete: (Result<Unit>) -> Unit) =
-        piperEngine.prepare(progress) { result ->
+    fun preparePiper(voiceId: String = PiperVoiceCatalog.defaultVoiceId, progress: (Int) -> Unit, onComplete: (Result<Unit>) -> Unit) =
+        piperEngine.prepare(voiceId, progress) { result ->
             if (result.isSuccess) piperEngine.warmUp()
             onComplete(result)
         }
 
+    fun deletePiperVoice(voiceId: String, onComplete: (Boolean) -> Unit = {}) {
+        piperEngine.deleteVoice(voiceId, onComplete)
+    }
+
     val piperAvailable: Boolean get() = piperEngine.isModuleInstalled || com.example.BuildConfig.PIPER_BUNDLED_FOR_DEBUG
-    val piperVoiceInstalled: Boolean get() = piperEngine.isVoiceInstalled
+    val piperVoiceInstalled: Boolean get() = piperEngine.isVoiceInstalled()
+    fun isPiperVoiceInstalled(voiceId: String): Boolean = piperEngine.isVoiceInstalled(voiceId)
 
     fun synthesizeAudio(text: String, rate: Float): SynthesizedAudio {
         return if (currentMode == TtsProviderMode.PIPER_OFFLINE && piperVoiceInstalled) {
@@ -111,7 +116,7 @@ class HybridTtsEngine(
         lastPitch = pitch
 
         try {
-            if (currentMode == TtsProviderMode.PIPER_OFFLINE && !piperEngine.isVoiceInstalled && !com.example.BuildConfig.PIPER_BUNDLED_FOR_DEBUG) {
+            if (currentMode == TtsProviderMode.PIPER_OFFLINE && !piperEngine.isVoiceInstalled() && !com.example.BuildConfig.PIPER_BUNDLED_FOR_DEBUG) {
                 Log.w(TAG, "PmugTts: Piper selected but voice not installed yet; falling back to Android for sentence $sentenceId")
                 fallbackToAndroid(sentenceId, text, rate, pitch, "Piper voice not downloaded yet")
                 return
@@ -151,10 +156,13 @@ class HybridTtsEngine(
         return list
     }
 
+    val currentVoiceId: String get() = piperEngine.currentVoiceId
+
     override fun setVoice(voiceId: String) {
         val selectedMode = TtsProviderMode.fromVoiceId(voiceId)
         if (selectedMode == TtsProviderMode.PIPER_OFFLINE) {
             switchProvider(TtsProviderMode.PIPER_OFFLINE)
+            piperEngine.setVoice(voiceId)
         } else {
             switchProvider(TtsProviderMode.ANDROID_SYSTEM)
             androidEngine.setVoice(voiceId)

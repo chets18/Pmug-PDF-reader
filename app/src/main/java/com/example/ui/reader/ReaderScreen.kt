@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.OpenInFull
 import com.example.domain.tts.HybridTtsEngine
 import com.example.domain.tts.TtsProviderMode
 import androidx.compose.material.icons.filled.Pause
@@ -220,6 +221,10 @@ fun ReaderScreen(
     var pdfPan by remember(document.path) { mutableStateOf(Offset.Zero) }
     var piperProgress by remember { mutableIntStateOf(0) }
     var preparingPiper by remember { mutableStateOf(false) }
+    var showVoiceSheet by remember { mutableStateOf(false) }
+    var downloadingVoiceId by remember { mutableStateOf<String?>(null) }
+    var voiceDownloadProgress by remember { mutableIntStateOf(0) }
+    var showFullScreenPdf by remember { mutableStateOf(false) }
 
     val hybridEngine = ttsEngine as? HybridTtsEngine
     LaunchedEffect(hybridEngine) {
@@ -620,7 +625,7 @@ fun ReaderScreen(
                                             } else if (hybridEngine != null) {
                                                 preparingPiper = true
                                                 piperProgress = 0
-                                                hybridEngine.preparePiper({ piperProgress = it }) { result ->
+                                                hybridEngine.preparePiper(progress = { piperProgress = it }) { result ->
                                                     preparingPiper = false
                                                     result.onSuccess {
                                                         currentProviderMode = mode
@@ -653,6 +658,13 @@ fun ReaderScreen(
                                                 )
                                             }
                                         }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Manage Piper Voices & Library...") },
+                                    onClick = {
+                                        showVoiceMenu = false
+                                        showVoiceSheet = true
                                     }
                                 )
                             }
@@ -764,7 +776,8 @@ fun ReaderScreen(
                         if (isPlaying) pauseReading()
                         scope.launch { listState.scrollToItem(0) }
                     }
-                }
+                },
+                onOpenFullScreen = { showFullScreenPdf = true }
             ) else Spacer(Modifier.height(8.dp))
             if (!extractionFinished) {
                 Column(
@@ -1047,6 +1060,78 @@ fun ReaderScreen(
             }
         }
     }
+
+    if (showVoiceSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showVoiceSheet = false },
+            sheetState = sheetState,
+            containerColor = PmugTokens.Surface,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            VoiceSelectionSheet(
+                ttsEngine = hybridEngine ?: return@ModalBottomSheet,
+                currentVoiceId = hybridEngine.currentVoiceId,
+                onSelectVoice = { voiceId ->
+                    hybridEngine.switchProvider(TtsProviderMode.PIPER_OFFLINE)
+                    hybridEngine.setVoice(voiceId)
+                    showVoiceSheet = false
+                    scope.launch { snackbarHostState.showSnackbar("Switched voice") }
+                    if (isPlaying) playSentence(currentSentenceIndex)
+                },
+                onDownloadVoice = { voice ->
+                    downloadingVoiceId = voice.id
+                    voiceDownloadProgress = 0
+                    hybridEngine.preparePiper(voice.id, progress = { voiceDownloadProgress = it }) { result ->
+                        downloadingVoiceId = null
+                        result.onSuccess {
+                            hybridEngine.switchProvider(TtsProviderMode.PIPER_OFFLINE)
+                            hybridEngine.setVoice(voice.id)
+                            showVoiceSheet = false
+                            scope.launch { snackbarHostState.showSnackbar("Voice ${voice.displayName} ready") }
+                            if (isPlaying) playSentence(currentSentenceIndex)
+                        }.onFailure { err ->
+                            scope.launch { snackbarHostState.showSnackbar(err.message ?: "Download failed") }
+                        }
+                    }
+                },
+                onDeleteVoice = { voiceId ->
+                    hybridEngine.deletePiperVoice(voiceId) { deleted ->
+                        scope.launch { snackbarHostState.showSnackbar(if (deleted) "Voice deleted" else "Could not delete voice") }
+                    }
+                },
+                onPreviewVoice = { voice ->
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Previewing ${voice.displayName}")
+                        ttsEngine.speakSentence(-1, "Previewing ${voice.displayName}.", 1.0f, 1.0f)
+                    }
+                },
+                downloadingVoiceId = downloadingVoiceId,
+                downloadProgress = voiceDownloadProgress,
+                onDismiss = { showVoiceSheet = false }
+            )
+        }
+    }
+
+    if (showFullScreenPdf && document.type == DocumentType.PDF) {
+        FullScreenPdfViewer(
+            document = document,
+            initialPage = readingPage,
+            isPlaying = isPlaying,
+            onTogglePlay = { if (isPlaying) pauseReading() else playSentence(currentSentenceIndex) },
+            onSkipPrevious = { skipBackward() },
+            onSkipNext = { skipForward() },
+            onPageChanged = { targetPage ->
+                readingPage = targetPage
+                val targetIndex = sentences.indexOfFirst { it.pageNumber == targetPage }
+                if (targetIndex >= 0) {
+                    currentSentenceIndex = targetIndex
+                    if (isPlaying) playSentence(targetIndex)
+                }
+            },
+            onClose = { showFullScreenPdf = false }
+        )
+    }
 }
 
 /**
@@ -1127,7 +1212,8 @@ private fun PdfPagePreview(
     pan: Offset,
     onZoomChange: (Float) -> Unit,
     onPanChange: (Offset) -> Unit,
-    onPageSwipe: (Int) -> Unit
+    onPageSwipe: (Int) -> Unit,
+    onOpenFullScreen: () -> Unit
 ) {
     val context = LocalContext.current
     var bitmap by remember(document.path, page) { mutableStateOf<Bitmap?>(null) }
@@ -1255,6 +1341,22 @@ private fun PdfPagePreview(
                 )
             } else {
                 Text("Loading PDF page $page…", color = PmugTokens.MutedInk)
+            }
+
+            IconButton(
+                onClick = onOpenFullScreen,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                    .size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.OpenInFull,
+                    contentDescription = "Full screen",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

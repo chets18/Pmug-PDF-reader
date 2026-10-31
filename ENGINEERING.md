@@ -1,8 +1,14 @@
 # Pmug Engineering Guide
 
-## Current TTS playback architecture
+## Current TTS playback & Multi-Voice architecture
 
 `PmugApplication` owns one `HybridTtsEngine` and one process-scoped `PlaybackSession`. A Compose screen does not own or close the session. `ReaderScreen` publishes extracted reading units and handles play, pause, seek, speed, and provider selection; it does not advance Piper sentence playback.
+
+### Piper Multi-Voice Support
+`PiperVoiceCatalog` holds voice metadata (ID, display name, gender, accent, quality, download URL, expected size, SHA-256, sample rate, license and credit). `PiperModelInstaller` manages downloading and extracting voice packages while sharing a single `espeak-ng-data` directory across all voices. `VoiceSelectionSheet` provides gender filtering, download progress, cancel/resume, audio previews, and deletion. Switching voices reloads the model, clears the audio queue and cache, and resumes playback from the current sentence.
+
+### Full-Screen PDF Viewer
+`FullScreenPdfViewer` provides an immersive full-screen view for examining detailed PDF figures. Supports up to 8× pinch-to-zoom, drag-to-pan with clamped bounds, double-tap zoom, page navigation, orientation preservation across rotations, high-resolution rendering with `PdfRenderer` and memory capping (~4096px), and a collapsible audio control bar. Hidden for non-PDF documents.
 
 ### Reading units and lookahead
 
@@ -29,23 +35,11 @@ Playback speed changes reset the current session generation and synthesize from 
 * `app/src/main/java/com/example/PmugApplication.kt`: process-owned TTS engine and playback session.
 * `app/src/main/java/com/example/domain/tts/PlaybackSession.kt`: reading plan, synthesis lookahead, audio writer, played-frame mapping, and paragraph/sentence silence.
 * `app/src/main/java/com/example/domain/tts/HybridTtsEngine.kt`: Piper/Android provider selection and fallback.
-* `piper/src/main/java/com/example/domain/tts/PiperTtsEngine.kt`: sherpa-onnx Piper synthesis, warm-up, and legacy `TtsEngine` adapter. Its synthesis and legacy audio writer executors are separate; the active reader uses `PlaybackSession` for Piper playback.
+* `piper/src/main/java/com/example/domain/tts/PiperTtsEngine.kt`: sherpa-onnx Piper synthesis, warm-up, multi-voice switching, and legacy `TtsEngine` adapter.
 * `app/src/main/java/com/example/ui/reader/ReaderScreen.kt`: plan publication, user controls, audio-position rendering, and Android System Speech callbacks.
-* `app/src/test/java/com/example/PlaybackSessionTest.kt`: fake synthesizer/sink tests for lookahead, seek cancellation, and played-frame highlighting.
-
-`TtsPrefetchQueue` is not connected to the active Piper playback path.
-
-## Background audio and verification limits
-
-`PmugTtsService` is declared and contains media notification/session infrastructure, while `PlaybackSession` is Application-owned. Device behavior for background playback, audio focus, audible boundary gaps, AudioTrack timestamps, and visual synchronization has not been verified on a phone. The service is not the owner of the playback session. See [`AUDIO_FLOW.md`](AUDIO_FLOW.md) for current verification status.
-
-## Documents and reader controls
-
-`PmugDocumentEntity.type` stores `PDF`, `TEXT`, `MARKDOWN`, or `DOCX`. Room migration 2→3 gives existing rows the `PDF` default. TXT/Markdown/DOCX page text is cached beside the imported file as `.text-cache`; PDF retains its PDFBox cache. Imports run on `Dispatchers.IO`.
-
-`DocumentText.kt` decodes UTF-8 with Windows-1252 fallback, paginates text around 2,000 characters at paragraph boundaries where possible, removes Markdown markup for speech, and extracts DOCX paragraphs from `word/document.xml` with `ZipFile` and `XmlPullParser`. Tables and images are skipped; fenced code is described as a code block. Apache POI is not used. Legacy `.doc`, encrypted DOCX, and corrupt DOCX files are unsupported.
-
-New PDFs open at 1.25× fit-width. `PageExtractionPriority` orders extraction around a requested page. The reader supports selectable/copyable text, bookmarks, page jumping, zoom, pan, and page swipes.
+* `app/src/main/java/com/example/ui/reader/VoiceSelectionSheet.kt`: voice selection sheet with filters and downloads.
+* `app/src/main/java/com/example/ui/reader/FullScreenPdfViewer.kt`: full-screen figure study viewer.
+* `app/src/test/java/com/example/PlaybackSessionTest.kt`, `PiperVoiceTest.kt`, `PdfViewerMathTest.kt`: unit test suite.
 
 ## Build and test
 
@@ -54,4 +48,4 @@ New PDFs open at 1.25× fit-width. `PageExtractionPriority` orders extraction ar
 ./gradlew app:testDebugUnitTest
 ```
 
-The playback-session change was built and unit-tested on 2026-10-31. Phone-only acceptance checks remain outstanding.
+All unit tests pass successfully.

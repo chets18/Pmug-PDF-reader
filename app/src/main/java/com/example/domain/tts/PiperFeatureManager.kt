@@ -27,7 +27,9 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
             Log.e(TAG, "Module check failed", error)
             throw error
         }
-    val isVoiceInstalled: Boolean get() = loadProvider()?.isInstalled() == true
+
+    fun isVoiceInstalled(voiceId: String = PiperVoiceCatalog.defaultVoiceId): Boolean = loadProvider()?.isInstalled(voiceId) == true
+    val currentVoiceId: String get() = PiperVoiceCatalog.defaultVoiceId
 
     override val isInitialized: Boolean get() = provider?.isInitialized == true
     override fun setListener(listener: TtsEngineListener) {
@@ -35,7 +37,7 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
         provider?.setListener(listener)
     }
 
-    fun prepare(progress: (Int) -> Unit, complete: (Result<Unit>) -> Unit) {
+    fun prepare(voiceId: String = PiperVoiceCatalog.defaultVoiceId, progress: (Int) -> Unit, complete: (Result<Unit>) -> Unit) {
         fun installVoice() {
             val p = loadProvider()
             if (p == null) {
@@ -49,8 +51,8 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
                 override fun onError(sentenceId: Int, message: String) = Unit
                 override fun onEngineReady() = Unit
             })
-            if (p.isInstalled()) { progress(100); complete(Result.success(Unit)) }
-            else p.install({ progress(50 + it / 2) }) { result ->
+            if (p.isInstalled(voiceId)) { progress(100); complete(Result.success(Unit)) }
+            else p.install(voiceId, { progress(50 + it / 2) }) { result ->
                 result.onSuccess { progress(100) }
                 complete(result.recoverCatching { error ->
                     val detail = error.message.orEmpty()
@@ -146,6 +148,12 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
         p.runSelfTest(report)
     }
 
+    fun deleteVoice(voiceId: String, onComplete: (Boolean) -> Unit) {
+        val p = loadProvider()
+        if (p == null) { onComplete(false); return }
+        p.deleteVoice(voiceId, onComplete)
+    }
+
     fun remove(onComplete: (Boolean) -> Unit) {
         val p = loadProvider()
         if (p == null) { onComplete(false); return }
@@ -202,10 +210,16 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
     fun warmUp() {
         loadProvider()?.warmUp()
     }
+
+    override fun setVoice(voiceId: String) {
+        loadProvider()?.setVoice(voiceId)
+    }
+
     override fun stop() { provider?.stop() }
     override fun shutdown() { provider?.shutdown(); provider = null }
-    override fun getAvailableVoices() = emptyList<VoiceOption>()
-    override fun setVoice(voiceId: String) = Unit
+    override fun getAvailableVoices() = loadProvider()?.getAvailableVoices() ?: PiperVoiceCatalog.voices.map { v ->
+        VoiceOption(v.id, v.displayName, "English (${v.accent})", true, "Not downloaded (~${v.expectedDownloadSize / (1024*1024)}MB)")
+    }
 
     private companion object { const val TAG = "PmugPiper" }
 }
