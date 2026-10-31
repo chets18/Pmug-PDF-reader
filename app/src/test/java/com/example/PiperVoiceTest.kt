@@ -1,6 +1,5 @@
 package com.example
 
-import com.example.domain.tts.PiperVoice
 import com.example.domain.tts.PiperVoiceCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -13,8 +12,8 @@ class PiperVoiceTest {
     fun testCatalogDefaultVoice() {
         val defaultVoice = PiperVoiceCatalog.getVoice(PiperVoiceCatalog.defaultVoiceId)
         assertNotNull(defaultVoice)
-        assertEquals("en_US-lessac-medium", defaultVoice.id)
-        assertEquals("female", defaultVoice.gender)
+        assertEquals("en_US-ryan-medium", defaultVoice.id)
+        assertEquals("male", defaultVoice.gender)
         assertEquals("US", defaultVoice.accent)
     }
 

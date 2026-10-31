@@ -1079,24 +1079,22 @@ fun ReaderScreen(
                     scope.launch { snackbarHostState.showSnackbar("Switched voice") }
                     if (isPlaying) playSentence(currentSentenceIndex)
                 },
-                onDownloadVoice = { voice ->
+                onDownloadVoice = { voice, onDone ->
                     downloadingVoiceId = voice.id
                     voiceDownloadProgress = 0
                     hybridEngine.preparePiper(voice.id, progress = { voiceDownloadProgress = it }) { result ->
                         downloadingVoiceId = null
                         result.onSuccess {
-                            hybridEngine.switchProvider(TtsProviderMode.PIPER_OFFLINE)
-                            hybridEngine.setVoice(voice.id)
-                            showVoiceSheet = false
-                            scope.launch { snackbarHostState.showSnackbar("Voice ${voice.displayName} ready") }
-                            if (isPlaying) playSentence(currentSentenceIndex)
+                            onDone()
+                            scope.launch { snackbarHostState.showSnackbar("Voice ${voice.displayName} downloaded & saved") }
                         }.onFailure { err ->
                             scope.launch { snackbarHostState.showSnackbar(err.message ?: "Download failed") }
                         }
                     }
                 },
-                onDeleteVoice = { voiceId ->
+                onDeleteVoice = { voiceId, onDone ->
                     hybridEngine.deletePiperVoice(voiceId) { deleted ->
+                        if (deleted) onDone()
                         scope.launch { snackbarHostState.showSnackbar(if (deleted) "Voice deleted" else "Could not delete voice") }
                     }
                 },

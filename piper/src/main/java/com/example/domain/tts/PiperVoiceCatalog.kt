@@ -16,9 +16,23 @@ data class PiperVoice(
 )
 
 object PiperVoiceCatalog {
-    val defaultVoiceId: String = "en_US-lessac-medium"
+    val defaultVoiceId: String = "en_US-ryan-medium"
 
     val voices: List<PiperVoice> = listOf(
+        PiperVoice(
+            id = "en_US-ryan-medium",
+            displayName = "Ryan (US Male, Default)",
+            gender = "male",
+            accent = "US",
+            quality = "medium",
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-medium.tar.bz2",
+            expectedDownloadSize = 62_000_000L,
+            sha256 = "",
+            sampleRate = 22050,
+            licenseName = "MIT / CC0",
+            licenseUrl = "https://github.com/rhasspy/piper",
+            credit = "Ryan dataset (Rhasspy)"
+        ),
         PiperVoice(
             id = "en_US-lessac-medium",
             displayName = "Lessac (US Female)",
@@ -46,20 +60,6 @@ object PiperVoiceCatalog {
             licenseName = "MIT / CC0",
             licenseUrl = "https://github.com/rhasspy/piper",
             credit = "Amy dataset (Rhasspy)"
-        ),
-        PiperVoice(
-            id = "en_US-ryan-medium",
-            displayName = "Ryan (US Male)",
-            gender = "male",
-            accent = "US",
-            quality = "medium",
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-medium.tar.bz2",
-            expectedDownloadSize = 62_000_000L,
-            sha256 = "",
-            sampleRate = 22050,
-            licenseName = "MIT / CC0",
-            licenseUrl = "https://github.com/rhasspy/piper",
-            credit = "Ryan dataset (Rhasspy)"
         ),
         PiperVoice(
             id = "en_GB-alan-medium",

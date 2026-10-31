@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,8 +48,8 @@ fun VoiceSelectionSheet(
     ttsEngine: HybridTtsEngine,
     currentVoiceId: String,
     onSelectVoice: (String) -> Unit,
-    onDownloadVoice: (PiperVoice) -> Unit,
-    onDeleteVoice: (String) -> Unit,
+    onDownloadVoice: (PiperVoice, () -> Unit) -> Unit,
+    onDeleteVoice: (String, () -> Unit) -> Unit,
     onPreviewVoice: (PiperVoice) -> Unit,
     downloadingVoiceId: String?,
     downloadProgress: Int,
@@ -56,6 +57,7 @@ fun VoiceSelectionSheet(
 ) {
     var genderFilter by remember { mutableStateOf("All") } // "All", "Female", "Male"
     var showLicenseDialogFor by remember { mutableStateOf<PiperVoice?>(null) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
 
     val filteredVoices = PiperVoiceCatalog.voices.filter { voice ->
         when (genderFilter) {
@@ -79,7 +81,7 @@ fun VoiceSelectionSheet(
             color = PmugTokens.Ink
         )
         Text(
-            text = "Choose among natural offline neural voices. Downloaded on demand, shared pronunciation data.",
+            text = "Choose among natural offline neural voices. Ryan voice is set as default. Downloaded models persist in storage.",
             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             color = PmugTokens.MutedInk
         )
@@ -103,7 +105,7 @@ fun VoiceSelectionSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth().height(360.dp)
         ) {
-            items(filteredVoices) { voice ->
+            items(filteredVoices, key = { "${it.id}_$refreshVersion" }) { voice ->
                 val isSelected = voice.id == currentVoiceId
                 val isDownloading = downloadingVoiceId == voice.id
                 val isInstalled = ttsEngine.isPiperVoiceInstalled(voice.id)
@@ -130,7 +132,7 @@ fun VoiceSelectionSheet(
                                     color = PmugTokens.Ink
                                 )
                                 Text(
-                                    text = "Accent: ${voice.accent} · Quality: ${voice.quality} · ${if (isInstalled) "Downloaded" else "Size: ~${voice.expectedDownloadSize / (1024*1024)}MB"}",
+                                    text = "Accent: ${voice.accent} · Quality: ${voice.quality} · ${if (isInstalled) "Downloaded & Saved" else "Size: ~${voice.expectedDownloadSize / (1024*1024)}MB"}",
                                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                                     color = PmugTokens.MutedInk
                                 )
@@ -167,7 +169,9 @@ fun VoiceSelectionSheet(
                                         if (isInstalled) {
                                             onSelectVoice(voice.id)
                                         } else {
-                                            onDownloadVoice(voice)
+                                            onDownloadVoice(voice) {
+                                                refreshVersion++
+                                            }
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(
@@ -194,7 +198,11 @@ fun VoiceSelectionSheet(
                                     )
                                 }
 
-                                IconButton(onClick = { onDeleteVoice(voice.id) }) {
+                                IconButton(onClick = {
+                                    onDeleteVoice(voice.id) {
+                                        refreshVersion++
+                                    }
+                                }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete voice", tint = PmugTokens.MutedInk)
                                 }
                             }
