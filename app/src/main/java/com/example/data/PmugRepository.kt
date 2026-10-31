@@ -5,6 +5,8 @@ import android.net.Uri
 import com.example.domain.pdf.AcademicTextCleaner
 import com.example.domain.pdf.PdfTextExtractor
 import com.example.domain.pdf.SentenceSplitter
+import com.example.domain.pdf.DocumentText
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -63,6 +65,7 @@ class PmugRepository(private val context: Context) {
                 file.delete()
             }
             File(file.parentFile, "${file.name}.text-cache.json").delete()
+            File(file.parentFile, "${file.name}.text-cache").delete()
         }
         dao.deleteDocument(documentId)
     }
@@ -84,16 +87,28 @@ class PmugRepository(private val context: Context) {
         dao.deleteBookmark(documentId, sentenceIndex)
     }
 
-    /**
-     * Imports a PDF: copies into app storage (files/documents/), extracts metadata,
-     * computes SHA-256 hash, and renders thumbnail.
-     */
+    /** Copies and parses a supported document into app-private storage on an IO dispatcher. */
     suspend fun prepareImport(uri: Uri): Result<PreparedPdf> = withContext(Dispatchers.IO) {
         try {
             val docsDir = File(context.filesDir, "documents").apply { mkdirs() }
             val rawFileName = getFileNameFromUri(context, uri)
-            val extension = if (rawFileName.contains(".")) rawFileName.substringAfterLast(".") else "pdf"
+            val mimeType = context.contentResolver.getType(uri).orEmpty()
+            val extension = if (rawFileName.contains(".")) rawFileName.substringAfterLast(".") else when (mimeType) {
+                "text/plain" -> "txt"
+                "text/markdown" -> "md"
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx"
+                "application/pdf" -> "pdf"
+                else -> ""
+            }
             val cleanName = rawFileName.substringBeforeLast(".")
+            val type = when (extension.lowercase()) {
+                "pdf" -> DocumentType.PDF
+                "txt" -> DocumentType.TEXT
+                "md", "markdown" -> DocumentType.MARKDOWN
+                "docx" -> DocumentType.DOCX
+                "doc" -> error("Legacy .doc files are not supported. Save as .docx and retry.")
+                else -> error("Unsupported file type. Choose a PDF, TXT, Markdown, or DOCX file.")
+            }
 
             val tempFile = File.createTempFile("pmug_temp_", ".$extension", context.cacheDir)
             context.contentResolver.openInputStream(uri)?.use { input ->
@@ -110,7 +125,19 @@ class PmugRepository(private val context: Context) {
             tempFile.delete()
 
             // Count real pages
-            val pageCount = ThumbnailCache.getPdfPageCount(targetFile)
+            val rawPages = when (type) {
+                DocumentType.PDF -> emptyList()
+                DocumentType.TEXT -> DocumentText.paginate(DocumentText.decodeText(targetFile.readBytes()))
+                DocumentType.MARKDOWN -> DocumentText.paginate(DocumentText.stripMarkdown(DocumentText.decodeText(targetFile.readBytes())))
+                DocumentType.DOCX -> try {
+                    DocumentText.paginate(DocumentText.extractDocx(targetFile))
+                } catch (failure: Throwable) {
+                    throw IllegalArgumentException("Could not read this DOCX file. It may be encrypted or corrupt.", failure)
+                }
+            }
+            val pageCount = if (type == DocumentType.PDF) {
+                PdfTextExtractor.validatePdfAndGetPageCount(context, targetFile)
+            } else rawPages.size
 
             val prepared = PreparedPdf(
                 id = "doc_" + UUID.randomUUID().toString().take(8),
@@ -119,10 +146,13 @@ class PmugRepository(private val context: Context) {
                 file = targetFile,
                 pageCount = pageCount,
                 rawPages = emptyList(),
-                isExtractable = true
+                isExtractable = true,
+                type = type
             )
+            if (rawPages.isNotEmpty()) File(targetFile.parentFile, "${targetFile.name}.text-cache").writeText(rawPages.joinToString("\u000c"))
             Result.success(prepared)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            Log.e("PmugTts", "Document import failed", e)
             Result.failure(e)
         }
     }
@@ -138,7 +168,8 @@ class PmugRepository(private val context: Context) {
             addedAt = now,
             lastReadAt = now,
             pinned = false,
-            finished = false
+            finished = false,
+            type = prepared.type
         )
         dao.insertDocument(entity)
         dao.saveProgress(PmugProgressEntity(documentId = prepared.id, page = 1, sentenceIndex = 0))
@@ -169,7 +200,9 @@ class PmugRepository(private val context: Context) {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (failure: Throwable) {
+            Log.w("PmugReader", "Could not read document filename", failure)
+        }
         return name
     }
 }
@@ -181,5 +214,6 @@ data class PreparedPdf(
     val file: File,
     val pageCount: Int,
     val rawPages: List<String>,
-    val isExtractable: Boolean
+    val isExtractable: Boolean,
+    val type: DocumentType = DocumentType.PDF
 )

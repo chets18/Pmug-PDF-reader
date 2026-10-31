@@ -86,6 +86,7 @@ import com.example.core.haptics.PmugHaptics
 import com.example.core.theme.PmugMotionSpec.pmugPressScale
 import com.example.core.theme.PmugTokens
 import com.example.data.PmugDocumentEntity
+import com.example.data.DocumentType
 import com.example.data.PmugProgressEntity
 import com.example.data.PmugRepository
 import com.example.data.ThumbnailCache
@@ -143,11 +144,11 @@ fun LibraryScreen(
             isImporting = true
             scope.launch {
                 try {
-                    val prepared = repository.prepareImport(uri).getOrThrow()
+                val prepared = repository.prepareImport(uri).getOrThrow()
                     val saved = repository.commitPreparedDocument(prepared)
                     onOpenDocument(saved.id)
                 } catch (err: Exception) {
-                    snackbarHostState.showSnackbar(err.message ?: "Could not import this PDF")
+                    snackbarHostState.showSnackbar(err.message ?: "Could not import this document")
                 } finally {
                     isImporting = false
                 }
@@ -188,7 +189,7 @@ fun LibraryScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    if (!isImporting) filePicker.launch(arrayOf("application/pdf", "application/x-pdf", "application/octet-stream", "*/*"))
+                    if (!isImporting) filePicker.launch(arrayOf("application/pdf", "text/plain", "text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream", "*/*"))
                 },
                 containerColor = PmugTokens.Accent,
                 contentColor = PmugTokens.TextOnAccent,
@@ -428,14 +429,14 @@ fun LibraryScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Button(
-                            onClick = { if (!isImporting) filePicker.launch(arrayOf("application/pdf", "application/x-pdf", "application/octet-stream", "*/*")) },
+                            onClick = { if (!isImporting) filePicker.launch(arrayOf("application/pdf", "text/plain", "text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream", "*/*")) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = PmugTokens.Accent,
                                 contentColor = PmugTokens.TextOnAccent
                             ),
                             shape = PmugTokens.ButtonShape,
                             modifier = Modifier
-                                .pmugPressScale(onClick = { filePicker.launch(arrayOf("application/pdf", "application/x-pdf", "application/octet-stream", "*/*")) })
+                                .pmugPressScale(onClick = { filePicker.launch(arrayOf("application/pdf", "text/plain", "text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream", "*/*")) })
                                 .testTag("empty_add_pdf_button")
                         ) {
                             Text(
@@ -689,13 +690,13 @@ private fun ContinueCard(
     LaunchedEffect(doc.id) {
         val prog = repository.getProgress(doc.id)
         progressPage = (prog?.page ?: 1).coerceAtLeast(1)
-        thumbnailBitmap = ThumbnailCache.getPageThumbnail(
+        thumbnailBitmap = if (doc.type == DocumentType.PDF) ThumbnailCache.getPageThumbnail(
             context = context,
             pdfFile = File(doc.path),
             fileHash = doc.hash,
             pageIndex = 0,
             targetWidth = 400
-        )
+        ) else null
     }
 
     val progressFraction = (progressPage.toFloat() / doc.pages.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
@@ -816,13 +817,13 @@ private fun DocumentCoverCard(
     LaunchedEffect(doc.id) {
         val prog = repository.getProgress(doc.id)
         progressPage = (prog?.page ?: 1).coerceAtLeast(1)
-        thumbnailBitmap = ThumbnailCache.getPageThumbnail(
+        thumbnailBitmap = if (doc.type == DocumentType.PDF) ThumbnailCache.getPageThumbnail(
             context = context,
             pdfFile = File(doc.path),
             fileHash = doc.hash,
             pageIndex = 0,
             targetWidth = 340
-        )
+        ) else null
     }
 
     val progressFraction = (progressPage.toFloat() / doc.pages.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
@@ -903,7 +904,7 @@ private fun DocumentCoverCard(
         )
 
         Text(
-            text = if (doc.finished) "Finished (${doc.pages} pages)" else "Page $progressPage of ${doc.pages}",
+            text = "${doc.type} · " + if (doc.finished) "Finished (${doc.pages} pages)" else "Page $progressPage of ${doc.pages}",
             style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
             color = if (doc.finished) PmugTokens.Accent else PmugTokens.MutedInk
         )

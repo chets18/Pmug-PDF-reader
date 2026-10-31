@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -140,6 +141,8 @@ fun PmugApp(
                         if (!UsageSignals.hasUsagePermission(activity)) {
                             showUsageDialog = true
                         }
+                    }.onFailure { failure ->
+                        Toast.makeText(activity, failure.message ?: "Could not import this document", Toast.LENGTH_LONG).show()
                     }
                 }
             }

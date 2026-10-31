@@ -148,3 +148,34 @@ object SentenceSplitter {
         return false
     }
 }
+
+data class ParagraphChunk(
+    val chunkId: Int,
+    val sentences: List<com.example.data.model.ParsedSentence>,
+    val combinedSpokenText: String
+)
+
+fun groupIntoParagraphChunks(sentences: List<com.example.data.model.ParsedSentence>): List<ParagraphChunk> {
+    val chunks = mutableListOf<ParagraphChunk>()
+    var currentChunkSentences = mutableListOf<com.example.data.model.ParsedSentence>()
+    var currentChars = 0
+    var chunkId = 0
+
+    for (sentence in sentences) {
+        currentChunkSentences.add(sentence)
+        currentChars += sentence.spokenText.length
+
+        if (currentChars >= 150 || sentence.isHeading || sentence == sentences.last()) {
+            if (currentChars >= 600 || sentence == sentences.last() || sentence.isHeading) {
+                chunks.add(ParagraphChunk(chunkId++, currentChunkSentences.toList(), currentChunkSentences.joinToString(" ") { it.spokenText }))
+                currentChunkSentences.clear()
+                currentChars = 0
+            }
+        }
+    }
+    if (currentChunkSentences.isNotEmpty()) {
+        chunks.add(ParagraphChunk(chunkId, currentChunkSentences.toList(), currentChunkSentences.joinToString(" ") { it.spokenText }))
+    }
+    return chunks
+}
+

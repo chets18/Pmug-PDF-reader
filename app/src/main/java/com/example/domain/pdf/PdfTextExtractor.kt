@@ -1,6 +1,7 @@
 package com.example.domain.pdf
 
 import android.content.Context
+import android.util.Log
 import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -18,6 +19,7 @@ import org.json.JSONObject
  * encodings are interpreted instead of treating compressed stream bytes as readable characters.
  */
 object PdfTextExtractor {
+    private const val TAG = "PmugReader"
 
     @Volatile private var pdfBoxInitialized = false
 
@@ -26,13 +28,19 @@ object PdfTextExtractor {
         context: Context,
         file: File,
         title: String,
+        priorityPages: () -> List<Int> = { emptyList() },
         onPage: (pageNumber: Int, pageText: String, pageCount: Int) -> Unit
     ): ExtractionResult {
         return try {
             val cacheFile = File(file.parentFile, "${file.name}.text-cache.json")
             val cached = readTextCache(cacheFile, file, title)
             if (cached != null) {
-                cached.rawPages.forEachIndexed { index, page -> onPage(index + 1, page, cached.estimatedPageCount) }
+                val done = mutableSetOf<Int>()
+                while (done.size < cached.estimatedPageCount) {
+                    val page = (priorityPages() + (1..cached.estimatedPageCount)).first { it in 1..cached.estimatedPageCount && it !in done }
+                    done += page
+                    onPage(page, cached.rawPages.getOrElse(page - 1) { "" }, cached.estimatedPageCount)
+                }
                 return cached
             }
             if (!pdfBoxInitialized) synchronized(this) {
@@ -45,12 +53,17 @@ object PdfTextExtractor {
                 val count = document.numberOfPages
                 val pages = ArrayList<String>(count)
                 val stripper = PDFTextStripper()
-                for (pageIndex in 0 until count) {
+                val done = mutableSetOf<Int>()
+                while (done.size < count) {
+                    val pageNumber = (priorityPages() + (1..count)).first { it in 1..count && it !in done }
+                    done += pageNumber
+                    val pageIndex = pageNumber - 1
                     stripper.startPage = pageIndex + 1
                     stripper.endPage = pageIndex + 1
                     val pageText = stripper.getText(document).trim()
-                    pages += pageText
-                    onPage(pageIndex + 1, pageText, count)
+                    while (pages.size <= pageIndex) pages += ""
+                    pages[pageIndex] = pageText
+                    onPage(pageNumber, pageText, count)
                 }
                 val joined = pages.joinToString(" ")
                 val letterRatio = joined.count { it.isLetter() }.toFloat() / joined.length.coerceAtLeast(1)
@@ -59,8 +72,24 @@ object PdfTextExtractor {
                     if (readable) null else "No readable selectable text found. This PDF may be scanned or use unsupported text encoding.")
                     .also { writeTextCache(cacheFile, file, it) }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            Log.e(TAG, "PDF page extraction failed for ${file.name}", e)
             ExtractionResult(cleanDocTitle(title), emptyList(), 0, false, e.message ?: "Could not extract PDF text")
+        }
+    }
+
+    fun validatePdfAndGetPageCount(context: Context, file: File): Int {
+        if (!pdfBoxInitialized) synchronized(this) {
+            if (!pdfBoxInitialized) {
+                PDFBoxResourceLoader.init(context.applicationContext)
+                pdfBoxInitialized = true
+            }
+        }
+        return try {
+            PDDocument.load(file).use { document -> document.numberOfPages.takeIf { it > 0 } ?: error("PDF has no pages") }
+        } catch (failure: Throwable) {
+            Log.e(TAG, "PDF validation failed for ${file.name}", failure)
+            throw IllegalArgumentException("This PDF is password-protected, corrupt, or unreadable.", failure)
         }
     }
 

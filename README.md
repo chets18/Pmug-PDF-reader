@@ -7,9 +7,10 @@ Pmug is a focused Android app for reading and listening to academic papers and P
 ## Features
 
 * **Distraction-Free Reading**: Clean typography with bionic text formatting for faster scanning.
-* **Cloud Voice Reader**: Gemini Puck, GPT-4o mini TTS, and TTS-1-HD through Puter.js, with automatic Android speech fallback.
-* **Optional Offline Neural Voice**: Piper is delivered as an on-demand Play Feature Delivery module. Its Lessac medium model downloads to app-private storage on first use.
-* **Smart PDF Extraction**: Built-in PDF stream parser that extracts text without heavy external libraries.
+* **Robust TTS Hierarchy**: Default offline Piper neural voice, OpenAI HD via Puter.js, and Android speech fallback. A prefetch queue prototype is present but is not yet connected to synthesis or playback.
+* **Background Playback**: Foreground service media playback supporting notifications, audio focus, and headphone disconnect handling.
+* **Multi-format Library**: Imports PDF, plain text, Markdown, and DOCX. Text formats are paginated locally and retain page navigation.
+* **Reader Controls**: Selectable text, copy-page action, page jump, and PDF zoom that starts at 125% of fit-width.
 * **Library Management**: Automatic shelves (*Continue*, *All*, *Finished*), document pinning, cover thumbnails, and search.
 * **Progress Sync & Bookmarks**: Save passage highlights and resume exactly where you left off.
 * **Interactive Companion**: "Pmug", an expressive mascot that reacts to reading speed and page milestones.
@@ -40,14 +41,17 @@ Pmug is a focused Android app for reading and listening to academic papers and P
 ## Technical Documentation
 
 * For developer and AI agent technical details, file maps, and component structure, see [`AGENTS.md`](file:///home/chetraj/Downloads/pmug(2)/AGENTS.md).
+* For architecture and engineering design, see [`ENGINEERING.md`](file:///home/chetraj/Downloads/pmug(2)/ENGINEERING.md).
 * For UI design tokens, color palette, typography, and UX guidelines, see [`DESIGN.md`](file:///home/chetraj/Downloads/pmug(2)/DESIGN.md).
 
 ## Reader behavior
 
 * The reader shows only the selected PDF page's extracted text beneath its real page. Speech keeps the highlighted sentence in view, and page swipes change the selected page. One-finger horizontal swipes navigate pages; two-finger pinches zoom around the finger midpoint, drag to pan, and double-tap to zoom at the tapped location.
-* Choosing a PDF from the library picker imports it, saves it, and opens the reader directly. The library shows an import status while processing.
+* Choosing PDF, TXT, Markdown, or DOCX from the library picker imports it, saves it, and opens the reader. Incoming VIEW and SEND intents accept the matching MIME types. Legacy .doc files and corrupt/encrypted DOCX files are not supported.
 * PDF import copies the file and reads its page count, then the reader extracts text page by page and shows each page as it becomes available. Extraction runs locally and does not require internet. Extracted pages are cached beside the private app copy, so reopening the same PDF skips the expensive parsing step.
-* PDFBox Android extracts text page by page using PDF font mappings. Unreadable or image-only/scanned PDFs still display their rendered page, but are not spoken; scanned documents need OCR.
+* PDFBox Android extracts text page by page using PDF font mappings. Unreadable or image-only/scanned PDFs still display their rendered page, but are not spoken; scanned documents need OCR. TXT uses UTF-8 then Windows-1252 fallback. Markdown markup is stripped for speech; DOCX reads paragraphs from `word/document.xml` without Apache POI.
+* TXT and Markdown pages target about 2,000 characters and break at paragraph boundaries where possible. Non-PDF documents show a text-only reader. The library labels each format.
+* New PDFs start at 125% of fit-width scale; double-tap, pinch, and pan remain available. Reader text supports selection and copying, with a Copy page text action. Tap the page count to jump and prioritize extraction around that page.
 * Each play action sends one complete sentence to the selected speech engine. Android System Speech highlights the spoken word when the device reports word timing; cloud voices report sentence timing and the UI estimates word timing for the active highlight.
-* Cloud voices use Puter.js `txt2speech`: Gemini uses provider `gemini`, model `gemini-3.8-flash-tts`, and voice `Puck`; OpenAI offers `gpt-4o-mini-tts` and `tts-1-hd` with voice `alloy`. If a cloud request fails, Android speaks that sentence and the chosen cloud model remains selected, with the error shown in a dark themed status message.
-* Piper is powered by sherpa-onnx in the `:piper` on-demand feature module for release. Debug builds set `PIPER_BUNDLED_FOR_DEBUG` and compile the Piper source plus sherpa-onnx dependencies into the base APK, so Android Studio Run on a phone does not need to install a feature split. Selecting Piper downloads the Lessac medium model and pronunciation data to `files/tts/piper`. Voice selection shows combined module/model progress, falls back to Android TTS on failures, and offers removal of the model plus deferred module uninstall. Setup requires network access and about 300 MB of temporary free storage. Release keeps Piper on demand.
+* Default voice order: (1) Piper offline neural voice; (2) OpenAI HD via Puter (`tts-1-hd`, voice `alloy`); (3) Android System Speech. If a request fails, fallback occurs per sentence.
+* Piper is powered by sherpa-onnx in the `:piper` on-demand feature module for release. Debug builds set `PIPER_BUNDLED_FOR_DEBUG` and compile the Piper source plus sherpa-onnx dependencies into the base APK. Selecting Piper downloads the Lessac medium model and pronunciation data to `files/tts/piper`.

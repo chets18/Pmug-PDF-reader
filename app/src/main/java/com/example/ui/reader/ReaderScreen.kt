@@ -13,7 +13,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -39,6 +38,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.ContentCopy
 import com.example.domain.tts.HybridTtsEngine
 import com.example.domain.tts.TtsProviderMode
 import androidx.compose.material.icons.filled.Pause
@@ -73,6 +74,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -112,6 +115,7 @@ import com.example.core.theme.PmugMotionSpec.pmugPressScale
 import com.example.core.theme.PmugTokens
 import com.example.data.PmugBookmarkEntity
 import com.example.data.PmugDocumentEntity
+import com.example.data.DocumentType
 import com.example.data.PmugRepository
 import com.example.data.ThumbnailCache
 import com.example.domain.pdf.AcademicTextCleaner
@@ -144,29 +148,53 @@ fun ReaderScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(isPlaying) {
+        view.keepScreenOn = isPlaying
+        onDispose {
+            view.keepScreenOn = false
+        }
+    }
 
     // Publish each page as soon as PDFBox finishes it so the reader can start before a large
     // document has been fully extracted. Sentence page numbers are preserved end to end.
-    var extractedPages by remember(document.path) { mutableStateOf<List<List<com.example.data.model.ParsedSentence>>>(emptyList()) }
+    var extractedPages by remember(document.path) { mutableStateOf(List(document.pages) { emptyList<com.example.data.model.ParsedSentence>() }) }
     var extractionFinished by remember(document.path) { mutableStateOf(false) }
     var pendingNextSentence by remember(document.path) { mutableIntStateOf(-1) }
+    var readingPage by remember(document.path) { mutableIntStateOf(1) }
+    val extractionTargetPage = remember(document.path) { java.util.concurrent.atomic.AtomicInteger(1) }
+    LaunchedEffect(readingPage) { extractionTargetPage.set(readingPage) }
     LaunchedEffect(document.path) {
-        extractedPages = emptyList()
         extractionFinished = false
         val mainHandler = Handler(Looper.getMainLooper())
         withContext(Dispatchers.IO) {
-            val pageSentences = mutableListOf<List<com.example.data.model.ParsedSentence>>()
-            com.example.domain.pdf.PdfTextExtractor.extractPdfFilePageByPage(context, File(document.path), document.title) { page, text, _ ->
-                val cleaned = AcademicTextCleaner.cleanExtractedText(listOf(text)).firstOrNull().orEmpty().ifBlank { text }
+            val pageSentences = MutableList(document.pages) { emptyList<com.example.data.model.ParsedSentence>() }
+            fun publish(page: Int, text: String) {
+                val cleaned = if (document.type == DocumentType.PDF) AcademicTextCleaner.cleanExtractedText(listOf(text)).firstOrNull().orEmpty().ifBlank { text } else text
                 val parsed = SentenceSplitter.splitIntoSentences(cleaned, startPage = page)
                 synchronized(pageSentences) {
-                    val offset = pageSentences.sumOf { it.size }
-                    pageSentences += parsed.map { it.copy(id = offset + it.id) }
-                    val snapshot = pageSentences.toList()
+                    if (page !in 1..pageSentences.size) return
+                    pageSentences[page - 1] = parsed
+                    var offset = 0
+                    val snapshot = pageSentences.map { pageList ->
+                        val indexed = pageList.map { it.copy(id = offset + it.id) }
+                        offset += indexed.size
+                        indexed
+                    }
                     mainHandler.post {
                         extractedPages = snapshot
                     }
                 }
+            }
+            if (document.type == DocumentType.PDF) {
+                com.example.domain.pdf.PdfTextExtractor.extractPdfFilePageByPage(
+                    context, File(document.path), document.title,
+                    { com.example.domain.pdf.PageExtractionPriority.order(document.pages, extractionTargetPage.get()) }
+                ) { page, text, _ -> publish(page, text) }
+            } else {
+                val cache = File(document.path + ".text-cache")
+                val pages = if (cache.exists()) cache.readText().split('\u000c') else emptyList()
+                pages.forEachIndexed { index, text -> publish(index + 1, text) }
             }
         }
         extractionFinished = true
@@ -177,7 +205,6 @@ fun ReaderScreen(
 
     // Current sentence and reading state
     var currentSentenceIndex by remember { mutableIntStateOf(0) }
-    var readingPage by remember { mutableIntStateOf(1) }
     val pageSentences = extractedPages.getOrNull(readingPage - 1).orEmpty()
     val pageSentenceStart = remember(sentences, readingPage) {
         sentences.indexOfFirst { it.pageNumber == readingPage }
@@ -185,13 +212,13 @@ fun ReaderScreen(
     var activeWordRange by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var isSentenceAudioStarted by remember { mutableStateOf(false) }
     var currentProviderMode by remember(ttsEngine) {
-        mutableStateOf((ttsEngine as? HybridTtsEngine)?.currentMode ?: TtsProviderMode.GEMINI_PUTER)
+        mutableStateOf((ttsEngine as? HybridTtsEngine)?.currentMode ?: TtsProviderMode.PIPER_OFFLINE)
     }
     var piperProgress by remember { mutableIntStateOf(0) }
     var preparingPiper by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var fontSizeSp by remember { mutableFloatStateOf(18f) }
-    var pdfZoom by remember(document.path) { mutableFloatStateOf(1f) }
+    var pdfZoom by remember(document.path) { mutableFloatStateOf(1.25f) }
     var pdfPan by remember(document.path) { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(sentences.size, extractionFinished, isPlaying, pendingNextSentence) {
@@ -217,6 +244,9 @@ fun ReaderScreen(
     // Saved Passages & Page Strip sheets
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showPageStrip by remember { mutableStateOf(false) }
+    var showPageDialog by remember { mutableStateOf(false) }
+    var pageInput by remember { mutableStateOf("1") }
+    var pendingJumpPage by remember { mutableIntStateOf(-1) }
     val bookmarksSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val bookmarks by repository.getBookmarks(document.id).collectAsState(initial = emptyList())
 
@@ -441,9 +471,13 @@ fun ReaderScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Page $readingPage of ${document.pages}",
+                            text = "Page $readingPage of ${document.pages} · ${document.type}",
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                            color = PmugTokens.MutedInk
+                            color = PmugTokens.MutedInk,
+                            modifier = Modifier.clickable {
+                                pageInput = readingPage.toString()
+                                showPageDialog = true
+                            }
                         )
                     }
                 },
@@ -460,6 +494,17 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        val text = pageSentences.joinToString("\n\n") { it.text }
+                        if (text.isNotBlank()) {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Page $readingPage", text))
+                            scope.launch { snackbarHostState.showSnackbar("Page text copied") }
+                        }
+                    }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy page text", tint = PmugTokens.Ink)
+                    }
+
                     // Voice Selection
                     var showVoiceMenu by remember { mutableStateOf(false) }
                     val hybridEngine = ttsEngine as? HybridTtsEngine
@@ -665,7 +710,7 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            PdfPagePreview(
+            if (document.type == DocumentType.PDF) PdfPagePreview(
                 document = document,
                 page = readingPage,
                 zoom = pdfZoom,
@@ -686,7 +731,7 @@ fun ReaderScreen(
                         scope.launch { listState.scrollToItem(0) }
                     }
                 }
-            )
+            ) else Spacer(Modifier.height(8.dp))
             if (!extractionFinished) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
@@ -705,6 +750,7 @@ fun ReaderScreen(
                 }
             }
             // Reading Text Stream
+            SelectionContainer {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -764,10 +810,10 @@ fun ReaderScreen(
                 if (pageSentences.isEmpty()) {
                     item(key = "no_extractable_text") {
                         Text(
-                            if (!extractionFinished && readingPage > extractedPages.size) {
+                            if (!extractionFinished && pageSentences.isEmpty()) {
                                 "Text for page $readingPage is still loading."
                             } else {
-                                "This PDF page has no readable selectable text. Scanned PDFs need OCR before speech can read them."
+                                if (document.type == DocumentType.PDF) "This PDF page has no readable selectable text. Scanned PDFs need OCR before speech can read them." else "No readable text on this page."
                             },
                             color = PmugTokens.MutedInk,
                             modifier = Modifier.padding(vertical = 20.dp)
@@ -778,6 +824,7 @@ fun ReaderScreen(
                 item {
                     Spacer(modifier = Modifier.height(100.dp))
                 }
+            }
             }
 
             // "Jump back to voice" button (shown if user scrolled manually)
@@ -838,6 +885,58 @@ fun ReaderScreen(
         }
     }
 
+    if (showPageDialog) {
+        AlertDialog(
+            onDismissRequest = { showPageDialog = false },
+            title = { Text("Go to page") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = pageInput,
+                        onValueChange = { pageInput = it.filter(Char::isDigit).take(7) },
+                        label = { Text("Page (1–${document.pages})") },
+                        singleLine = true
+                    )
+                    Slider(
+                        value = (pageInput.toFloatOrNull() ?: 1f).coerceIn(1f, document.pages.toFloat()),
+                        onValueChange = { pageInput = it.toInt().coerceIn(1, document.pages).toString() },
+                        valueRange = 1f..document.pages.toFloat()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    com.example.domain.pdf.PageNumberValidation.parse(pageInput, document.pages)?.let { page ->
+                        readingPage = page
+                        extractionTargetPage.set(page)
+                        pendingJumpPage = page
+                        isFollowingVoice = true
+                        pendingNextSentence = -1
+                        isSentenceAudioStarted = false
+                        activeWordRange = null
+                        scope.launch { listState.scrollToItem(0) }
+                        if (isPlaying) ttsEngine.stop()
+                    }
+                    showPageDialog = false
+                }, enabled = com.example.domain.pdf.PageNumberValidation.parse(pageInput, document.pages) != null) { Text("Go") }
+            },
+            dismissButton = { TextButton(onClick = { showPageDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    LaunchedEffect(pendingJumpPage, extractedPages) {
+        val page = pendingJumpPage
+        val target = extractedPages.getOrNull(page - 1).orEmpty().firstOrNull()
+        if (target != null) {
+            val index = sentences.indexOfFirst { it.pageNumber == page }
+            if (index >= 0) {
+                currentSentenceIndex = index
+                pendingJumpPage = -1
+                if (isPlaying) playSentence(index)
+            }
+        }
+    }
+
     // Saved Passages Bottom Sheet
     if (showBookmarksSheet) {
         ModalBottomSheet(
@@ -863,7 +962,7 @@ fun ReaderScreen(
 
                 if (bookmarks.isEmpty()) {
                     Text(
-                        text = "No passages saved yet. Long-press any sentence to bookmark it.",
+                        text = "No passages saved yet. Tap the bookmark icon beside a sentence to save it.",
                         color = PmugTokens.MutedInk,
                         fontSize = 14.sp
                     )
@@ -944,10 +1043,6 @@ private fun SentenceItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(backgroundColor)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
             .padding(horizontal = if (isCurrent) 10.dp else 0.dp, vertical = 6.dp)
     ) {
         Row(
@@ -970,16 +1065,16 @@ private fun SentenceItem(
                 fontSize = fontSizeSp.sp,
                 lineHeight = (fontSizeSp * 1.6f).sp,
                 color = textColor,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable(onClick = onClick)
             )
 
-            if (isBookmarked) {
-                Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            IconButton(onClick = onLongClick, modifier = Modifier.size(28.dp)) {
                 Icon(
                     imageVector = Icons.Default.Bookmark,
-                    contentDescription = "Saved",
-                    tint = if (isCurrent) PmugTokens.TextOnAccent else PmugTokens.Accent,
-                    modifier = Modifier.size(16.dp)
+                    contentDescription = if (isBookmarked) "Remove bookmark" else "Save bookmark",
+                    tint = if (isBookmarked) PmugTokens.Accent else if (isCurrent) PmugTokens.TextOnAccent.copy(alpha = 0.55f) else PmugTokens.MutedInk.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -1022,7 +1117,7 @@ private fun PdfPagePreview(
                     detectTapGestures(
                         onDoubleTap = { tap ->
                             val oldZoom = currentZoom.value
-                            val nextZoom = if (oldZoom > 1.01f) 1f else 2f
+                            val nextZoom = if (oldZoom > 1.25f) 1.25f else 2f
                             val delta = Offset(tap.x - size.width / 2f, tap.y - size.height / 2f)
                             if (nextZoom == 1f) {
                                 latestPanChange.value(Offset.Zero)
