@@ -12,6 +12,7 @@
         tools:ignore="ProtectedPermissions" />
 
     <application
+        android:name=".PmugApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

@@ -16,10 +16,12 @@ object SentenceSplitter {
 
         val paragraphs = rawText.split(Regex("\\n{2,}"))
         var sentenceIndex = 0
+        var paragraphCounter = 0
 
         for (paragraph in paragraphs) {
             val trimmedPara = paragraph.trim().replace(Regex("\\s+"), " ")
             if (trimmedPara.isBlank()) continue
+            paragraphCounter++
 
             // Check if paragraph looks like a heading or section title
             val isHeading = isLikelyHeading(trimmedPara)
@@ -31,6 +33,7 @@ object SentenceSplitter {
                         text = trimmedPara,
                         spokenText = cleanSpoken,
                         pageNumber = startPage,
+                        paragraphIndex = paragraphCounter,
                         isHeading = true,
                         estimatedWords = trimmedPara.split(" ").size
                     )
@@ -52,6 +55,7 @@ object SentenceSplitter {
                         text = clean,
                         spokenText = cleanSpoken,
                         pageNumber = startPage,
+                        paragraphIndex = paragraphCounter,
                         isHeading = false,
                         estimatedWords = clean.split(" ").filter { it.isNotBlank() }.size
                     )

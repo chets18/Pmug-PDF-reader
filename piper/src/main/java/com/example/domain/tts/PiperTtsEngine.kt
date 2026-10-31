@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.os.Build
+import com.example.domain.tts.SynthesizedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -25,7 +26,11 @@ class PiperTtsEngine(context: Context) : TtsEngine {
     private val worker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pmug-piper-tts").apply { isDaemon = true }
     }
+    private val audioWriter = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pmug-piper-audio-writer").apply { isDaemon = true }
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val synthesisLock = Any()
     private val requestGeneration = AtomicLong(0L)
 
     @Volatile private var tts: OfflineTts? = null
@@ -33,6 +38,8 @@ class PiperTtsEngine(context: Context) : TtsEngine {
     @Volatile private var isClosed = false
     @Volatile private var audioTrack: AudioTrack? = null
     @Volatile private var audioTrackObjectsCreatedCount = 0
+    @Volatile private var pendingMarkerSentenceId = -1
+    @Volatile private var framesSubmitted = 0L
     private var lastChunkEndTime: Long = 0L
 
     override val isInitialized: Boolean
@@ -41,6 +48,48 @@ class PiperTtsEngine(context: Context) : TtsEngine {
     override fun setListener(listener: TtsEngineListener) {
         this.listener = listener
         if (isInitialized) mainHandler.post { listener.onEngineReady() }
+    }
+
+    fun synthesizeAudio(text: String, rate: Float): SynthesizedAudio {
+        val synthStart = System.currentTimeMillis()
+        val audio = synchronized(synthesisLock) {
+            getOrCreateEngine().generate(text, sid = 0, speed = rate.coerceIn(0.5f, 2.0f))
+        }
+        val synthEnd = System.currentTimeMillis()
+        val synthTimeMs = synthEnd - synthStart
+
+        val sampleRate = if (audio.sampleRate > 0) audio.sampleRate else 22050
+        val samples = audio.samples ?: floatArrayOf()
+        val audioDurationMs = if (sampleRate > 0) (samples.size * 1000L / sampleRate) else 0L
+        val rtf = if (audioDurationMs > 0) synthTimeMs.toFloat() / audioDurationMs.toFloat() else 0f
+
+        // Trim near-silence
+        var startIdx = 0
+        while (startIdx < samples.size && abs(samples[startIdx]) <= 0.01f) {
+            startIdx++
+        }
+        var endIdx = samples.size - 1
+        while (endIdx > startIdx && abs(samples[endIdx]) <= 0.01f) {
+            endIdx--
+        }
+        val trimmed = if (startIdx <= endIdx) samples.copyOfRange(startIdx, endIdx + 1) else floatArrayOf()
+        val finalAudioDurationMs = if (sampleRate > 0) (trimmed.size * 1000L / sampleRate) else audioDurationMs
+
+        Log.i(TAG, "PmugTts: [Synthesize] synthMs=$synthTimeMs audioMs=$finalAudioDurationMs rtf=$rtf")
+        return SynthesizedAudio(trimmed, sampleRate, rtf)
+    }
+
+    fun warmUp() {
+        worker.execute {
+            try {
+                synchronized(synthesisLock) {
+                    getOrCreateEngine().generate("Warm up.", sid = 0, speed = 1.0f)
+                }
+                Log.i(TAG, "PmugTts: Piper engine warmed up")
+            } catch (e: Throwable) {
+                Log.w(TAG, "Piper warm-up failed: ${e.message}")
+            }
+        }
     }
 
     override fun speakSentence(sentenceId: Int, text: String, rate: Float, pitch: Float) {
@@ -56,7 +105,9 @@ class PiperTtsEngine(context: Context) : TtsEngine {
                 val engine = getOrCreateEngine()
                 if (generation != requestGeneration.get() || isClosed) return@execute
 
-                val audio = engine.generate(text, sid = 0, speed = rate.coerceIn(0.5f, 2.0f))
+                val audio = synchronized(synthesisLock) {
+                    engine.generate(text, sid = 0, speed = rate.coerceIn(0.5f, 2.0f))
+                }
                 val synthEnd = System.currentTimeMillis()
                 val synthTimeMs = synthEnd - synthStart
 
@@ -80,9 +131,7 @@ class PiperTtsEngine(context: Context) : TtsEngine {
                 val leadingSilenceMs = if (sampleRate > 0) (startIdx * 1000L / sampleRate) else 0L
                 val trailingSilenceMs = if (sampleRate > 0) ((samples.size - 1 - endIdx) * 1000L / sampleRate) else 0L
 
-                // Add 120ms pause between sentences
-                val pauseSamples = (sampleRate * 0.12f).toInt()
-                val finalSamples = FloatArray(trimmed.size + pauseSamples)
+                val finalSamples = trimmed
                 System.arraycopy(trimmed, 0, finalSamples, 0, trimmed.size)
 
                 val finalAudioDurationMs = if (sampleRate > 0) (finalSamples.size * 1000L / sampleRate) else audioDurationMs
@@ -118,8 +167,12 @@ class PiperTtsEngine(context: Context) : TtsEngine {
         if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
             track.play()
         }
+        if (sentenceId >= 0) {
+            pendingMarkerSentenceId = sentenceId
+            track.setNotificationMarkerPosition((framesSubmitted + samples.size).toInt())
+        }
 
-        worker.execute {
+        audioWriter.execute {
             try {
                 var offset = 0
                 val chunkSize = 2048
@@ -136,18 +189,7 @@ class PiperTtsEngine(context: Context) : TtsEngine {
                         }
                     }
                 }
-                // Simulate completion after duration
-                val durationMs = (samples.size * 1000L / sampleRate)
-                Thread.sleep(durationMs.coerceAtLeast(10L))
-                lastChunkEndTime = System.currentTimeMillis()
-                Log.i(TAG, "PmugTts: playbackEndTime=$lastChunkEndTime chunkId=$sentenceId")
-                if (sentenceId >= 0) {
-                    mainHandler.post {
-                        if (generation == requestGeneration.get()) {
-                            listener?.onSentenceCompleted(sentenceId)
-                        }
-                    }
-                }
+                framesSubmitted += offset
             } catch (e: Throwable) {
                 Log.e(TAG, "Streaming audio write error", e)
             }
@@ -163,6 +205,16 @@ class PiperTtsEngine(context: Context) : TtsEngine {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes((minBuf * 2).coerceAtLeast(8192))
             .build()
+        track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: AudioTrack) {
+                val completedId = pendingMarkerSentenceId
+                pendingMarkerSentenceId = -1
+                lastChunkEndTime = System.currentTimeMillis()
+                if (completedId >= 0) listener?.onSentenceCompleted(completedId)
+                Log.i(TAG, "PmugTts: playbackEndTime=$lastChunkEndTime chunkId=$completedId")
+            }
+            override fun onPeriodicNotification(track: AudioTrack) = Unit
+        }, mainHandler)
         audioTrackObjectsCreatedCount++
         audioTrack = track
         Log.i(TAG, "PmugTts: Created long-lived AudioTrack object count=$audioTrackObjectsCreatedCount sampleRate=$sampleRate")
@@ -227,6 +279,8 @@ class PiperTtsEngine(context: Context) : TtsEngine {
             audioTrack?.let {
                 if (it.playState == AudioTrack.PLAYSTATE_PLAYING) it.stop()
                 it.flush()
+                framesSubmitted = 0L
+                pendingMarkerSentenceId = -1
             }
         } catch (_: Throwable) {}
         lastChunkEndTime = 0L
@@ -248,6 +302,7 @@ class PiperTtsEngine(context: Context) : TtsEngine {
             tts = null
         }
         worker.shutdown()
+        audioWriter.shutdownNow()
     }
 
     fun deleteDownloadedVoice(onComplete: (Boolean) -> Unit = {}) {

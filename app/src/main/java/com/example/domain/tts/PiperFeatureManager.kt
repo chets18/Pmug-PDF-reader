@@ -193,6 +193,15 @@ class PiperFeatureManager(private val context: Context) : TtsEngine {
         if (p == null) listener?.onError(sentenceId, "Piper feature unavailable: ${providerLoadFailure?.javaClass?.simpleName}: ${providerLoadFailure?.message ?: "provider load failed; see PmugPiper log"}")
         else p.synthesize(sentenceId, text, rate, pitch)
     }
+
+    fun synthesizeAudio(sentence: String, rate: Float): SynthesizedAudio {
+        val p = loadProvider()
+        return p?.synthesizeAudio(sentence, rate) ?: SynthesizedAudio(FloatArray(0), 22050)
+    }
+
+    fun warmUp() {
+        loadProvider()?.warmUp()
+    }
     override fun stop() { provider?.stop() }
     override fun shutdown() { provider?.shutdown(); provider = null }
     override fun getAvailableVoices() = emptyList<VoiceOption>()

@@ -3,6 +3,7 @@ package com.example.piper
 import android.content.Context
 import com.example.domain.tts.PiperProvider
 import com.example.domain.tts.PiperTtsEngine
+import com.example.domain.tts.SynthesizedAudio
 import com.example.domain.tts.TtsEngineListener
 import com.example.domain.tts.VoiceOption
 import java.io.File
@@ -19,6 +20,8 @@ class PiperProviderImpl(context: Context) : PiperProvider {
     override fun install(progressCallback: (Int) -> Unit, onComplete: (Result<Unit>) -> Unit) = engine.install(progressCallback, onComplete)
     override fun speakSentence(sentenceId: Int, text: String, rate: Float, pitch: Float) = engine.speakSentence(sentenceId, text, rate, pitch)
     override fun synthesize(sentenceId: Int, sentence: String, rate: Float, pitch: Float) = engine.speakSentence(sentenceId, sentence, rate, pitch)
+    override fun synthesizeAudio(sentence: String, rate: Float): SynthesizedAudio = engine.synthesizeAudio(sentence, rate)
+    override fun warmUp() = engine.warmUp()
     override fun getAvailableVoices(): List<VoiceOption> = engine.getAvailableVoices()
     override fun setVoice(voiceId: String) = engine.setVoice(voiceId)
     override fun runSelfTest(report: (String, Boolean, String) -> Unit) = engine.runSelfTest(report)

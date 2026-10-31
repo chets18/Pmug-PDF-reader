@@ -81,6 +81,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -140,6 +141,7 @@ fun ReaderScreen(
     document: PmugDocumentEntity,
     repository: PmugRepository,
     ttsEngine: TtsEngine,
+    playbackSession: com.example.domain.tts.PlaybackSession,
     isPlaying: Boolean,
     onSetPlaying: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -205,25 +207,91 @@ fun ReaderScreen(
 
     // Current sentence and reading state
     var currentSentenceIndex by remember { mutableIntStateOf(0) }
-    val pageSentences = extractedPages.getOrNull(readingPage - 1).orEmpty()
-    val pageSentenceStart = remember(sentences, readingPage) {
-        sentences.indexOfFirst { it.pageNumber == readingPage }
-    }
     var activeWordRange by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var isSentenceAudioStarted by remember { mutableStateOf(false) }
     var currentProviderMode by remember(ttsEngine) {
         mutableStateOf((ttsEngine as? HybridTtsEngine)?.currentMode ?: TtsProviderMode.PIPER_OFFLINE)
     }
-    var piperProgress by remember { mutableIntStateOf(0) }
-    var preparingPiper by remember { mutableStateOf(false) }
+    var mascotMood by remember { mutableStateOf(PmugMood.IDLE) }
+    var smugNotice by remember { mutableStateOf<String?>(null) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var fontSizeSp by remember { mutableFloatStateOf(18f) }
     var pdfZoom by remember(document.path) { mutableFloatStateOf(1.25f) }
     var pdfPan by remember(document.path) { mutableStateOf(Offset.Zero) }
+    var piperProgress by remember { mutableIntStateOf(0) }
+    var preparingPiper by remember { mutableStateOf(false) }
+
+    val hybridEngine = ttsEngine as? HybridTtsEngine
+    LaunchedEffect(hybridEngine) {
+        hybridEngine?.warmUpPiper()
+    }
+
+    LaunchedEffect(sentences, extractionFinished) {
+        if (sentences.isNotEmpty()) {
+            val units = sentences.map { s ->
+                com.example.domain.tts.PlaybackUnit(
+                    sentenceId = s.id,
+                    text = s.text,
+                    pageIndex = s.pageNumber - 1,
+                    paragraphIndex = (s.pageNumber * 1_000_000) + s.paragraphIndex,
+                    spokenText = s.spokenText
+                )
+            }
+            playbackSession.appendUnits(units, complete = extractionFinished, owner = document.id)
+        }
+    }
+
+    // Polling loop for Piper mode position & highlight
+    LaunchedEffect(isPlaying, currentProviderMode) {
+        if (!isPlaying || currentProviderMode != TtsProviderMode.PIPER_OFFLINE) return@LaunchedEffect
+        while (isPlaying && currentProviderMode == TtsProviderMode.PIPER_OFFLINE && hybridEngine?.piperVoiceInstalled == true) {
+            withFrameNanos { _ ->
+                val pos = playbackSession.position()
+                if (pos.playing && pos.sentenceId >= 0) {
+                    if (pos.sentenceId != currentSentenceIndex) {
+                        currentSentenceIndex = pos.sentenceId
+                        sentences.getOrNull(pos.sentenceId)?.let { s ->
+                            readingPage = s.pageNumber
+                        }
+                    }
+                    val s = sentences.getOrNull(pos.sentenceId)
+                    if (s != null) {
+                        val words = Regex("\\S+").findAll(s.text).toList()
+                        val word = words.getOrNull(pos.wordIndex)
+                        val nextRange = word?.let { it.range.first to (it.range.last + 1) }
+                        if (activeWordRange != nextRange) activeWordRange = nextRange
+                    }
+                    mascotMood = PmugMood.READING
+                } else if (activeWordRange != null) {
+                    activeWordRange = null
+                }
+                if (playbackSession.playbackState() == "finished") {
+                    onSetPlaying(false)
+                    mascotMood = PmugMood.DOCUMENT_FINISHED
+                    smugNotice = "Cover to cover. Obviously."
+                    scope.launch {
+                        repository.setFinished(document.id, true)
+                    }
+                } else if (playbackSession.playbackState() == "error") {
+                    val failedSentence = sentences.getOrNull(currentSentenceIndex)
+                    playbackSession.stop()
+                    hybridEngine?.switchProvider(TtsProviderMode.ANDROID_SYSTEM)
+                    currentProviderMode = TtsProviderMode.ANDROID_SYSTEM
+                    failedSentence?.let { ttsEngine.speakSentence(it.id, it.spokenText, playbackSpeed, 1.0f) }
+                }
+            }
+        }
+    }
+
+    // Current sentence and reading state
+    val pageSentences = extractedPages.getOrNull(readingPage - 1).orEmpty()
+    val pageSentenceStart = remember(sentences, readingPage) {
+        sentences.indexOfFirst { it.pageNumber == readingPage }
+    }
 
     LaunchedEffect(sentences.size, extractionFinished, isPlaying, pendingNextSentence) {
         val next = pendingNextSentence
-        if (isPlaying && next >= 0 && next < sentences.size) {
+        if (isPlaying && currentProviderMode == TtsProviderMode.ANDROID_SYSTEM && next >= 0 && next < sentences.size) {
             pendingNextSentence = -1
             currentSentenceIndex = next
             ttsEngine.speakSentence(next, sentences[next].spokenText, playbackSpeed, 1.0f)
@@ -234,9 +302,6 @@ fun ReaderScreen(
     }
 
     // Mascot State & Smug feedback
-    var mascotMood by remember { mutableStateOf(PmugMood.IDLE) }
-    var smugNotice by remember { mutableStateOf<String?>(null) }
-
     // Scroll state & user manual scroll detection
     val listState = rememberLazyListState()
     var isFollowingVoice by remember { mutableStateOf(true) }
@@ -321,6 +386,7 @@ fun ReaderScreen(
             mascotMood = PmugMood.READING
         },
         onSentenceCompleted = { sId ->
+            if (currentProviderMode != TtsProviderMode.PIPER_OFFLINE || hybridEngine?.piperVoiceInstalled != true) {
             activeWordRange = null
             isSentenceAudioStarted = false
             val nextIdx = sId + 1
@@ -358,6 +424,7 @@ fun ReaderScreen(
                     }
                 }
             }
+            }
         },
         onWordRange = { sId, start, end ->
             if (sId == currentSentenceIndex) activeWordRange = start to end
@@ -365,17 +432,6 @@ fun ReaderScreen(
         onProviderChanged = { mode -> currentProviderMode = mode },
         onError = { message -> scope.launch { snackbarHostState.showSnackbar(message) } }
     )
-
-    // Cloud voices supply sentence timing, so estimate a moving word highlight between callbacks.
-    LaunchedEffect(isSentenceAudioStarted, currentSentenceIndex, currentProviderMode, playbackSpeed) {
-        if (!isSentenceAudioStarted || !currentProviderMode.usesEstimatedWordTiming) return@LaunchedEffect
-        val words = Regex("\\S+").findAll(sentences.getOrNull(currentSentenceIndex)?.text.orEmpty()).toList()
-        val intervalMs = (60_000f / (150f * playbackSpeed.coerceAtLeast(0.5f))).toLong().coerceAtLeast(120L)
-        for (word in words) {
-            activeWordRange = word.range.first to (word.range.last + 1)
-            delay(intervalMs)
-        }
-    }
 
     if (preparingPiper) {
         AlertDialog(
@@ -399,7 +455,13 @@ fun ReaderScreen(
         mascotMood = PmugMood.READING
         isFollowingVoice = true
         val sentence = sentences[index]
-        ttsEngine.speakSentence(index, sentence.spokenText, playbackSpeed, 1.0f)
+        if (currentProviderMode == TtsProviderMode.PIPER_OFFLINE && hybridEngine?.piperVoiceInstalled == true) {
+            if (playbackSession.currentSpeed() != playbackSpeed) playbackSession.setSpeed(playbackSpeed)
+            if (playbackSession.playbackState() == "paused" && currentSentenceIndex == index) playbackSession.resume()
+            else playbackSession.play(index)
+        } else {
+            ttsEngine.speakSentence(index, sentence.spokenText, playbackSpeed, 1.0f)
+        }
     }
 
     fun pauseReading() {
@@ -407,7 +469,8 @@ fun ReaderScreen(
         isSentenceAudioStarted = false
         activeWordRange = null
         mascotMood = PmugMood.PAUSED
-        ttsEngine.stop()
+        if (currentProviderMode == TtsProviderMode.PIPER_OFFLINE && hybridEngine?.piperVoiceInstalled == true) playbackSession.pause()
+        else ttsEngine.stop()
         scope.launch {
             repository.saveReadingPosition(document.id, readingPage, currentSentenceIndex)
         }
@@ -886,7 +949,10 @@ fun ReaderScreen(
                         isSentenceAudioStarted = false
                         activeWordRange = null
                         scope.launch { listState.scrollToItem(0) }
-                        if (isPlaying) ttsEngine.stop()
+                        if (isPlaying) {
+                            if (currentProviderMode == TtsProviderMode.PIPER_OFFLINE && hybridEngine?.piperVoiceInstalled == true) playbackSession.stop()
+                            else ttsEngine.stop()
+                        }
                     }
                     showPageDialog = false
                 }, enabled = com.example.domain.pdf.PageNumberValidation.parse(pageInput, document.pages) != null) { Text("Go") }
@@ -1027,7 +1093,7 @@ private fun SentenceItem(
                         val safeStart = start.coerceIn(0, sentence.length)
                         val safeEnd = end.coerceIn(safeStart, sentence.length)
                         if (safeStart < safeEnd) addStyle(
-                            SpanStyle(background = PmugTokens.TextOnAccent, color = PmugTokens.Accent, fontWeight = FontWeight.Bold),
+                            SpanStyle(background = PmugTokens.TextOnAccent.copy(alpha = 0.28f)),
                             safeStart, safeEnd
                         )
                     }

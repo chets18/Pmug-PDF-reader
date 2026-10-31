@@ -59,7 +59,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         repository = PmugRepository(this)
-        ttsEngine = com.example.domain.tts.HybridTtsEngine(this)
+        val app = application as PmugApplication
+        ttsEngine = app.ttsEngine
 
         // Schedule periodic nudge checks every 30 mins
         NudgeWorker.schedule(this)
@@ -83,7 +84,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        ttsEngine.shutdown()
     }
 }
 
@@ -196,6 +196,7 @@ fun PmugApp(
                             document = doc,
                             repository = repository,
                             ttsEngine = ttsEngine,
+                            playbackSession = (activity.application as PmugApplication).playbackSession,
                             isPlaying = isAudioPlaying,
                             onSetPlaying = { playing ->
                                 isAudioPlaying = playing

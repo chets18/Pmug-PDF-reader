@@ -5,6 +5,7 @@ data class ParsedSentence(
     val text: String,
     val spokenText: String,
     val pageNumber: Int = 1,
+    val paragraphIndex: Int = 0,
     val isHeading: Boolean = false,
     val estimatedWords: Int = 0,
     val isBookmarked: Boolean = false,

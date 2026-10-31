@@ -2,6 +2,8 @@ package com.example.domain.tts
 
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -44,31 +46,42 @@ class AndroidTtsEngine(private val context: Context) : TtsEngine {
     }
 
     private fun setupUtteranceListener() {
+        val handler = Handler(Looper.getMainLooper())
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-                val sentenceId = utteranceId?.toIntOrNull() ?: return
-                listener?.onSentenceStarted(sentenceId)
+                handler.post {
+                    val sentenceId = utteranceId?.toIntOrNull() ?: return@post
+                    listener?.onSentenceStarted(sentenceId)
+                }
             }
 
             override fun onDone(utteranceId: String?) {
-                val sentenceId = utteranceId?.toIntOrNull() ?: return
-                listener?.onSentenceCompleted(sentenceId)
+                handler.post {
+                    val sentenceId = utteranceId?.toIntOrNull() ?: return@post
+                    listener?.onSentenceCompleted(sentenceId)
+                }
             }
 
             override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-                val sentenceId = utteranceId?.toIntOrNull() ?: return
-                listener?.onWordRange(sentenceId, start, end)
+                handler.post {
+                    val sentenceId = utteranceId?.toIntOrNull() ?: return@post
+                    listener?.onWordRange(sentenceId, start, end)
+                }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                val sentenceId = utteranceId?.toIntOrNull() ?: return
-                listener?.onError(sentenceId, "TTS playback error")
+                handler.post {
+                    val sentenceId = utteranceId?.toIntOrNull() ?: return@post
+                    listener?.onError(sentenceId, "TTS playback error")
+                }
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
-                val sentenceId = utteranceId?.toIntOrNull() ?: return
-                listener?.onError(sentenceId, "TTS error code: $errorCode")
+                handler.post {
+                    val sentenceId = utteranceId?.toIntOrNull() ?: return@post
+                    listener?.onError(sentenceId, "TTS error code: $errorCode")
+                }
             }
         })
     }

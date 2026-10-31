@@ -75,10 +75,25 @@ class HybridTtsEngine(
     }
 
     fun preparePiper(progress: (Int) -> Unit, onComplete: (Result<Unit>) -> Unit) =
-        piperEngine.prepare(progress, onComplete)
+        piperEngine.prepare(progress) { result ->
+            if (result.isSuccess) piperEngine.warmUp()
+            onComplete(result)
+        }
 
     val piperAvailable: Boolean get() = piperEngine.isModuleInstalled || com.example.BuildConfig.PIPER_BUNDLED_FOR_DEBUG
     val piperVoiceInstalled: Boolean get() = piperEngine.isVoiceInstalled
+
+    fun synthesizeAudio(text: String, rate: Float): SynthesizedAudio {
+        return if (currentMode == TtsProviderMode.PIPER_OFFLINE && piperVoiceInstalled) {
+            piperEngine.synthesizeAudio(text, rate)
+        } else {
+            SynthesizedAudio(FloatArray(0), 22050)
+        }
+    }
+
+    fun warmUpPiper() {
+        if (piperVoiceInstalled) piperEngine.warmUp()
+    }
 
     private fun engineFor(mode: TtsProviderMode): TtsEngine = when (mode) {
         TtsProviderMode.PIPER_OFFLINE -> piperEngine
