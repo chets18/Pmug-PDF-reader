@@ -1236,111 +1236,114 @@ private fun PdfPagePreview(
             Modifier
                 .fillMaxWidth()
                 .height(300.dp)
-                .pointerInput(page) {
-                    detectTapGestures(
-                        onDoubleTap = { tap ->
-                            val oldZoom = currentZoom.value
-                            val nextZoom = if (oldZoom > 1.25f) 1.25f else 2f
-                            val delta = Offset(tap.x - size.width / 2f, tap.y - size.height / 2f)
-                            if (nextZoom == 1f) {
-                                latestPanChange.value(Offset.Zero)
-                            } else {
-                                latestPanChange.value(currentPan.value + delta * (oldZoom - nextZoom))
-                            }
-                            latestZoomChange.value(nextZoom)
-                        }
-                    )
-                }
-                .pointerInput(page) {
-                    awaitEachGesture {
-                        awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
-                        var horizontalDistance = 0f
-                        var previousPosition: Offset? = null
-                        var previousCentroid: Offset? = null
-                        var previousDistance: Float? = null
-                        var gestureZoom = currentZoom.value
-                        var gesturePan = currentPan.value
-                        var usedMultipleFingers = false
-                        var fingersDown: Boolean
-                        do {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val pressed = event.changes.filter { it.pressed }
-                            if (pressed.size > 1) {
-                                usedMultipleFingers = true
-                                val first = pressed[0].position
-                                val second = pressed[1].position
-                                val centroid = (first + second) / 2f
-                                val dx = first.x - second.x
-                                val dy = first.y - second.y
-                                val distance = kotlin.math.sqrt(dx * dx + dy * dy)
-                                val oldDistance = previousDistance
-                                val oldCentroid = previousCentroid
-                                if (oldDistance != null && oldDistance > 0f && oldCentroid != null) {
-                                    val factor = distance / oldDistance
-                                    val nextZoom = (gestureZoom * factor).coerceIn(1f, 4f)
-                                    val appliedFactor = nextZoom / gestureZoom
-                                    val anchor = centroid - Offset(size.width / 2f, size.height / 2f)
-                                    gestureZoom = nextZoom
-                                    gesturePan = if (nextZoom == 1f) Offset.Zero else {
-                                        gesturePan + (centroid - oldCentroid) + anchor * (1f - appliedFactor)
-                                    }.let { candidate ->
-                                        val maxX = size.width * (gestureZoom - 1f) / 2f
-                                        val maxY = size.height * (gestureZoom - 1f) / 2f
-                                        Offset(candidate.x.coerceIn(-maxX, maxX), candidate.y.coerceIn(-maxY, maxY))
-                                    }
-                                    latestZoomChange.value(nextZoom)
-                                    latestPanChange.value(gesturePan)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(page) {
+                        detectTapGestures(
+                            onDoubleTap = { tap ->
+                                val oldZoom = currentZoom.value
+                                val nextZoom = if (oldZoom > 1.25f) 1.25f else 2f
+                                val delta = Offset(tap.x - size.width / 2f, tap.y - size.height / 2f)
+                                if (nextZoom == 1f) {
+                                    latestPanChange.value(Offset.Zero)
+                                } else {
+                                    latestPanChange.value(currentPan.value + delta * (oldZoom - nextZoom))
                                 }
-                                previousCentroid = centroid
-                                previousDistance = distance
-                            } else {
-                                previousCentroid = null
-                                previousDistance = null
+                                latestZoomChange.value(nextZoom)
                             }
-                            val primaryX = pressed.firstOrNull()?.position?.x
-                            if (primaryX != null) {
-                                val point = pressed.first().position
-                                previousPosition?.let { previous ->
-                                    val movement = point - previous
-                                    horizontalDistance += movement.x
-                                    if (gestureZoom > 1.01f) {
-                                        val maxX = size.width * (gestureZoom - 1f) / 2f
-                                        val maxY = size.height * (gestureZoom - 1f) / 2f
-                                        gesturePan = Offset(
-                                            (gesturePan.x + movement.x).coerceIn(-maxX, maxX),
-                                            (gesturePan.y + movement.y).coerceIn(-maxY, maxY)
-                                        )
+                        )
+                    }
+                    .pointerInput(page) {
+                        awaitEachGesture {
+                            awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
+                            var horizontalDistance = 0f
+                            var previousPosition: Offset? = null
+                            var previousCentroid: Offset? = null
+                            var previousDistance: Float? = null
+                            var gestureZoom = currentZoom.value
+                            var gesturePan = currentPan.value
+                            var usedMultipleFingers = false
+                            var fingersDown: Boolean
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size > 1) {
+                                    usedMultipleFingers = true
+                                    val first = pressed[0].position
+                                    val second = pressed[1].position
+                                    val centroid = (first + second) / 2f
+                                    val dx = first.x - second.x
+                                    val dy = first.y - second.y
+                                    val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+                                    val oldDistance = previousDistance
+                                    val oldCentroid = previousCentroid
+                                    if (oldDistance != null && oldDistance > 0f && oldCentroid != null) {
+                                        val factor = distance / oldDistance
+                                        val nextZoom = (gestureZoom * factor).coerceIn(1f, 4f)
+                                        val appliedFactor = nextZoom / gestureZoom
+                                        val anchor = centroid - Offset(size.width / 2f, size.height / 2f)
+                                        gestureZoom = nextZoom
+                                        gesturePan = if (nextZoom == 1f) Offset.Zero else {
+                                            gesturePan + (centroid - oldCentroid) + anchor * (1f - appliedFactor)
+                                        }.let { candidate ->
+                                            val maxX = size.width * (gestureZoom - 1f) / 2f
+                                            val maxY = size.height * (gestureZoom - 1f) / 2f
+                                            Offset(candidate.x.coerceIn(-maxX, maxX), candidate.y.coerceIn(-maxY, maxY))
+                                        }
+                                        latestZoomChange.value(nextZoom)
                                         latestPanChange.value(gesturePan)
                                     }
+                                    previousCentroid = centroid
+                                    previousDistance = distance
+                                } else {
+                                    previousCentroid = null
+                                    previousDistance = null
                                 }
-                                previousPosition = point
-                            }
-                            fingersDown = pressed.isNotEmpty()
-                        } while (fingersDown)
+                                val primaryX = pressed.firstOrNull()?.position?.x
+                                if (primaryX != null) {
+                                    val point = pressed.first().position
+                                    previousPosition?.let { previous ->
+                                        val movement = point - previous
+                                        horizontalDistance += movement.x
+                                        if (gestureZoom > 1.01f) {
+                                            val maxX = size.width * (gestureZoom - 1f) / 2f
+                                            val maxY = size.height * (gestureZoom - 1f) / 2f
+                                            gesturePan = Offset(
+                                                (gesturePan.x + movement.x).coerceIn(-maxX, maxX),
+                                                (gesturePan.y + movement.y).coerceIn(-maxY, maxY)
+                                            )
+                                            latestPanChange.value(gesturePan)
+                                        }
+                                    }
+                                    previousPosition = point
+                                }
+                                fingersDown = pressed.isNotEmpty()
+                            } while (fingersDown)
 
-                        // A two-finger gesture always belongs to zoom/pan. At enlarged scale,
-                        // one-finger drags pan the page instead of changing the PDF page.
-                        if (!usedMultipleFingers && currentZoom.value <= 1.01f && abs(horizontalDistance) > 60f) {
-                            onPageSwipe(if (horizontalDistance < 0f) 1 else -1)
+                            if (!usedMultipleFingers && currentZoom.value <= 1.01f && abs(horizontalDistance) > 60f) {
+                                onPageSwipe(if (horizontalDistance < 0f) 1 else -1)
+                            }
                         }
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            if (bitmap != null) {
-                Image(
-                    bitmap!!.asImageBitmap(),
-                    contentDescription = "PDF page $page",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(8.dp).graphicsLayer {
-                        scaleX = zoom
-                        scaleY = zoom
-                        translationX = pan.x
-                        translationY = pan.y
-                    }
-                )
-            } else {
-                Text("Loading PDF page $page…", color = PmugTokens.MutedInk)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap!!.asImageBitmap(),
+                        contentDescription = "PDF page $page",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(8.dp).graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationX = pan.x
+                            translationY = pan.y
+                        }
+                    )
+                } else {
+                    Text("Loading PDF page $page…", color = PmugTokens.MutedInk)
+                }
             }
 
             IconButton(
@@ -1348,14 +1351,14 @@ private fun PdfPagePreview(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
-                    .size(36.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    .size(40.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.OpenInFull,
                     contentDescription = "Full screen",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
