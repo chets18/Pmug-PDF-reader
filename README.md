@@ -7,8 +7,8 @@ Pmug is a focused Android app for reading and listening to academic papers and P
 ## Features
 
 * **Distraction-Free Reading**: Clean typography with bionic text formatting for faster scanning.
-* **Robust TTS Hierarchy**: Default offline Piper neural voice and Android System speech fallback.
-* **Background Playback**: Foreground service media playback supporting notifications, audio focus, and headphone disconnect handling.
+* **Continuous Piper Playback**: A process-owned session synthesizes ahead and streams sentence audio through one long-lived `AudioTrack`; Android System Speech remains the fallback.
+* **Audio-Synced Highlighting**: Piper sentence and word highlights follow played audio frames. Android System Speech uses platform word-range callbacks when available.
 * **Multi-format Library**: Imports PDF, plain text, Markdown, and DOCX. Text formats are paginated locally and retain page navigation.
 * **Reader Controls**: Selectable text, copy-page action, page jump, and PDF zoom that starts at 125% of fit-width.
 * **Library Management**: Automatic shelves (*Continue*, *All*, *Finished*), document pinning, cover thumbnails, and search.
@@ -52,6 +52,9 @@ Pmug is a focused Android app for reading and listening to academic papers and P
 * PDFBox Android extracts text page by page using PDF font mappings. Unreadable or image-only/scanned PDFs still display their rendered page, but are not spoken; scanned documents need OCR. TXT uses UTF-8 then Windows-1252 fallback. Markdown markup is stripped for speech; DOCX reads paragraphs from `word/document.xml` without Apache POI.
 * TXT and Markdown pages target about 2,000 characters and break at paragraph boundaries where possible. Non-PDF documents show a text-only reader. The library labels each format.
 * New PDFs start at 125% of fit-width scale; double-tap, pinch, and pan remain available. Reader text supports selection and copying, with a Copy page text action. Tap the page count to jump and prioritize extraction around that page.
-* Each play action sends one complete sentence to the selected speech engine. Android System Speech highlights the spoken word when the device reports word timing; Piper reports sentence timing.
-* Default voice order: (1) Piper offline neural voice; (2) Android System Speech. If a request fails, fallback occurs per sentence.
+* Sentence splitting is unchanged. In Piper mode, `PlaybackSession` owns sentence progression and synthesizes up to 15 seconds ahead on a worker separate from the AudioTrack writer. The reader supplies extracted sentence units and consumes the session's audio position for highlighting and scrolling.
+* Word spans use the displayed sentence text and real clip length. Android System Speech uses `onRangeStart` callbacks for word highlighting; callbacks are posted to the main thread. No estimated words-per-minute timer is used.
+* Piper inserts 150 ms between sentences and 350 ms when the paragraph changes. `PmugTts:` logs synthesis timing, audio and highlight boundaries, gaps, buffered audio, first-sound latency, and underruns.
+* Default voice order: (1) Piper offline neural voice; (2) Android System Speech. If a request fails, playback falls back to Android System Speech.
 * Piper is powered by sherpa-onnx in the `:piper` on-demand feature module for release. Debug builds set `PIPER_BUNDLED_FOR_DEBUG` and compile the Piper source plus sherpa-onnx dependencies into the base APK. Selecting Piper downloads the Lessac medium model and pronunciation data to `files/tts/piper`.
+* For the playback architecture and device-verification limits, see [`AUDIO_FLOW.md`](AUDIO_FLOW.md).

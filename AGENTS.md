@@ -23,6 +23,7 @@ This document serves as the primary technical reference for developers and AI ag
 ```
 app/src/main/java/com/example/
 ├── MainActivity.kt                      # Single Activity, Compose routing, incoming Intent handling
+├── PmugApplication.kt                   # Process-owned HybridTtsEngine and PlaybackSession
 ├── data/
 │   ├── PmugDatabase.kt                  # Room database instance
 │   ├── PmugDao.kt                       # DAO for Room DB operations
@@ -39,8 +40,9 @@ app/src/main/java/com/example/
 │   │   ├── AndroidTtsEngine.kt          # Built-in offline Android TextToSpeech engine
 │   │   ├── PiperFeatureManager.kt       # SplitInstall and reflective loader for Piper feature
 │   │   ├── HybridTtsEngine.kt           # Hybrid TTS manager with voice fallback
-│   │   ├── TtsPrefetchQueue.kt          # Bounded prefetch pipeline for gapless speech playback
-│   │   └── PmugTtsService.kt            # Foreground media playback service with audio focus and notifications
+│   │   ├── PlaybackSession.kt           # App-owned Piper plan, synth lookahead, AudioTrack writer and frame position
+│   │   ├── TtsPrefetchQueue.kt          # Legacy queue utility; not used by the active Piper session
+│   │   └── PmugTtsService.kt            # Foreground media notification/service infrastructure
 │   └── retention/
 │       └── RetentionEngine.kt           # Key takeaway and retention review card generator
 ├── mascot/
@@ -87,3 +89,13 @@ app/src/main/java/com/example/
 `DocumentText.kt` contains strict UTF-8 with Windows-1252 fallback decoding, paragraph-aware pages targeting 2,000 characters, Markdown cleanup, and DOCX paragraph extraction from `word/document.xml`. It uses `ZipFile` and `XmlPullParser`; no Apache POI dependency is needed. Tables and images are skipped and fenced code is described as a code block.
 
 Non-PDF documents use a text-only reader. The library displays the stored document type. New PDFs open at 1.25× the fit-width scale. Page-number validation and extraction order are in `PageNumberValidation` and `PageExtractionPriority`; the reader supports selectable text, a Copy page text action, and a page-jump dialog.
+
+## 5. TTS playback path
+
+`PmugApplication` owns the `HybridTtsEngine` and a process-scoped `PlaybackSession`. Sentence segmentation remains in `SentenceSplitter`; each parsed sentence remains one playback unit. `ReaderScreen` supplies extracted units and handles play, pause, seek, speed, and provider selection. Piper sentence progression is driven by the session, not the reader's sentence-completion callback.
+
+The session has one `PmugSynthesis` worker, one `PmugAudioWriter` worker, and one long-lived streaming `AudioTrack`. It synthesizes up to 15 seconds ahead, bounded at 40 MiB. Audio position uses an extrapolated `AudioTimestamp`; playback-head position with output-latency adjustment is the fallback. Position is clamped monotonic within a play generation and reset on flush/seek/speed changes.
+
+Word spans are weighted over `ParsedSentence.text` and the generated clip's frame count. The reader samples position with `withFrameNanos`, changes the Compose highlight only when the word changes, and styles the word with a background only. Android System Speech uses `onRangeStart`; utterance callbacks are posted to the main thread. Piper logs timing and buffer/underrun data with the `PmugTts:` prefix. Paragraph changes add 350 ms of silence; sentence boundaries within a paragraph add 150 ms.
+
+`PmugTtsService` remains declared as service/media-notification infrastructure. The playback session is currently owned by the Application, and phone-level background/foreground-service behavior must be verified separately. See `AUDIO_FLOW.md` for the current flow and verification status.
