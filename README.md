@@ -1,64 +1,71 @@
-# Pmug - Academic PDF Reader & Speech Companion
+# Pmug
 
-Pmug is a focused Android app for reading and listening to academic papers and PDFs. It uses PDFBox Android for page-by-page text extraction, Piper offline neural text-to-speech, Android System Text-to-Speech, bionic reading typography, and an expressive mascot companion.
+**A reading partner for papers, books, and the pages you mean to get through.**
 
----
+Pmug is an Android reader that pairs a calm reading experience with spoken text. Follow along as sentences are highlighted, or read at your own pace and pick up where you left off. It supports PDFs, plain text, Markdown, and DOCX, with offline text-to-speech options.
 
-## Features
+## Screenshots
 
-* **Distraction-Free Reading**: Clean typography with bionic text formatting for faster scanning.
-* **Continuous Piper Playback**: A process-owned session synthesizes ahead and streams sentence audio through one long-lived `AudioTrack`; Android System Speech remains the fallback.
-* **Audio-Synced Highlighting**: Piper sentence and word highlights follow played audio frames. Android System Speech uses platform word-range callbacks when available.
-* **Multi-Voice Piper Library**: Choose among several offline neural Piper voices (including female and male options) with gender filtering, download progress, cancel/resume, per-voice deletion, preview, and shared pronunciation data (`espeak-ng-data`).
-* **Full-Screen PDF Viewer**: Immersive full-screen view for studying detailed figures with up to 8× pinch zoom, pan, double-tap zoom, page swipe / navigation, high-resolution rendering with `PdfRenderer` and memory cap, and a floating audio control bar.
-* **Multi-format Library**: Imports PDF, plain text, Markdown, and DOCX. Text formats are paginated locally and retain page navigation.
-* **Reader Controls**: Selectable text, copy-page action, page jump, and PDF zoom that starts at 125% of fit-width.
-* **Library Management**: Automatic shelves (*Continue*, *All*, *Finished*), document pinning, cover thumbnails, and search.
-* **Progress Sync & Bookmarks**: Save passage highlights and resume exactly where you left off.
-* **Interactive Companion**: "Pmug", an expressive mascot that reacts to reading speed and page milestones.
+| Your library | Read and listen | Choose a voice |
+|:--:|:--:|:--:|
+| ![Pmug library](screenshots/screen1.png) | ![Pmug reader](screenshots/screen2.png) | ![Pmug voice selection](screenshots/screen3.png) |
 
----
+| Full-screen page view | Reading companion | More of Pmug |
+|:--:|:--:|:--:|
+| ![Full-screen document view](screenshots/screen4.png) | ![Pmug reading screen](screenshots/screen5.png) | ![Pmug app screen](screenshots/screen6.png) |
 
-## Setup & Running
+## Why I built it
 
-### Prerequisites
-* [Android Studio](https://developer.android.com/studio) (2023.3+ or Ladybug/Koala/Mainline)
-* JDK 11 or higher
-* Android SDK 24+ (Android 7.0+)
+I wanted a reading partner: something that could sit alongside me, help me keep going, and make dense material easier to follow. I often struggled to read more than three pages continuously. Pmug grew from that experience.
 
-### Building locally
-1. Clone or open the project folder in Android Studio.
-2. Let Gradle sync dependencies.
-3. Run or build the app:
-   ```bash
-   ./gradlew app:assembleDebug
-   ```
-4. Install the ABI-specific APK for your device or emulator from `app/build/outputs/apk/debug/` (for most current Android phones, choose `app-arm64-v8a-debug.apk`):
-   ```bash
-   adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-   ```
+While speech reads a sentence, Pmug highlights it so your eyes can follow along. The goal is speech that feels more open and natural than a rapid stream of text, with a focused layout that keeps attention on the page. I also want the app to stay small enough to be practical on a wide range of Android devices.
 
----
+## What it can do
 
-## Technical Documentation
+- **Read and listen together:** Follow spoken sentences with synchronized highlighting.
+- **Offline speech:** Use Piper neural voices, with Android system text-to-speech as a fallback.
+- **Choose a voice:** Browse, preview, download, and manage Piper voices.
+- **Read multiple formats:** Import PDF, TXT, Markdown, and DOCX documents.
+- **Keep your place:** Resume reading, save bookmarks, and track progress.
+- **Study PDF pages:** Select and copy extracted text, jump to a page, and zoom into figures in the full-screen viewer.
+- **Stay organized:** Search your library and browse Continue, All, and Finished shelves.
+- **Read comfortably:** Use bionic typography and a clean, distraction-free reader.
 
-* For developer and AI agent technical details, file maps, and component structure, see [`AGENTS.md`](file:///home/chetraj/Downloads/pmug(2)/AGENTS.md).
-* For architecture and engineering design, see [`ENGINEERING.md`](file:///home/chetraj/Downloads/pmug(2)/ENGINEERING.md).
-* For UI design tokens, color palette, typography, and UX guidelines, see [`DESIGN.md`](file:///home/chetraj/Downloads/pmug(2)/DESIGN.md).
+Text extraction and speech processing are designed to work on-device. Image-only or scanned PDFs can still be viewed, but require OCR before their text can be read aloud.
 
-## Reader behavior & Features
+## The idea for Pmug
 
-* The reader shows only the selected PDF page's extracted text beneath its real page. Speech keeps the highlighted sentence in view, and page swipes change the selected page. One-finger horizontal swipes navigate pages; two-finger pinches zoom around the finger midpoint, drag to pan, and double-tap to zoom at the tapped location.
-* **Full-Screen PDF Viewer**: Tapping the full-screen icon in the top-right corner of the PDF page preview opens an immersive full-screen view. Supports pinch-to-zoom up to 8×, drag-to-pan, double-tap zoom, page navigation, orientation persistence, and a collapsible audio control bar. Hidden for non-PDF documents.
-* **Piper Voice Library**: Accessible via the voice menu in the top app bar. Allows filtering voices by gender (All, Female, Male), viewing voice cards (name, accent, quality, size, download state), previewing voices, downloading on demand with progress, cancelling/resuming, and deleting voice models. Pronunciation data (`espeak-ng-data`) is shared across voices.
-* Choosing PDF, TXT, Markdown, or DOCX from the library picker imports it, saves it, and opens the reader. Incoming VIEW and SEND intents accept the matching MIME types. Legacy .doc files and corrupt/encrypted DOCX files are not supported.
-* PDF import copies the file and reads its page count, then the reader extracts text page by page and shows each page as it becomes available. Extraction runs locally and does not require internet. Extracted pages are cached beside the private app copy, so reopening the same PDF skips the expensive parsing step.
-* PDFBox Android extracts text page by page using PDF font mappings. Unreadable or image-only/scanned PDFs still display their rendered page, but are not spoken; scanned documents need OCR. TXT uses UTF-8 then Windows-1252 fallback. Markdown markup is stripped for speech; DOCX reads paragraphs from `word/document.xml` without Apache POI.
-* TXT and Markdown pages target about 2,000 characters and break at paragraph boundaries where possible. Non-PDF documents show a text-only reader. The library labels each format.
-* New PDFs start at 125% of fit-width scale; double-tap, pinch, and pan remain available. Reader text supports selection and copying, with a Copy page text action. Tap the page count to jump and prioritize extraction around that page.
-* Sentence splitting is unchanged. In Piper mode, `PlaybackSession` owns sentence progression and synthesizes up to 15 seconds ahead on a worker separate from the AudioTrack writer. The reader supplies extracted sentence units and consumes the session's audio position for highlighting and scrolling.
-* Word spans use the displayed sentence text and real clip length. Android System Speech uses `onRangeStart` callbacks for word highlighting; callbacks are posted to the main thread. No estimated words-per-minute timer is used.
-* Piper inserts 150 ms between sentences and 350 ms when the paragraph changes. `PmugTts:` logs synthesis timing, audio and highlight boundaries, gaps, buffered audio, first-sound latency, and underruns.
-* Default voice order: (1) Piper offline neural voice; (2) Android System Speech. If a request fails, playback falls back to Android System Speech.
-* Piper is powered by sherpa-onnx in the `:piper` on-demand feature module for release. Debug builds set `PIPER_BUNDLED_FOR_DEBUG` and compile the Piper source plus sherpa-onnx dependencies into the base APK. Selecting Piper downloads the voice model and pronunciation data to `files/tts/piper`.
-* For the playback architecture and device-verification limits, see [`AUDIO_FLOW.md`](AUDIO_FLOW.md).
+Pmug's mascot is meant to feel like a companion, not decoration. The longer-term vision is for it to respond to the reader's effort and offer gentle, playful breaks. For example, after a few pages, it might suggest resting your eyes for 20 seconds, close its own eyes, and briefly cover the screen before returning to the reading session. Later, it could speak and move its mouth in sync with speech.
+
+These are future ideas, not features currently available. The aim is to make reading feel more supportive and human while keeping the reader in control.
+
+## Build and run
+
+### Requirements
+
+- Android Studio
+- JDK 11 or newer
+- Android SDK 24 (Android 7.0) or newer
+
+### Build a debug APK
+
+```bash
+./gradlew app:assembleDebug
+```
+
+Install the APK that matches your device from `app/build/outputs/apk/debug/`. Most current Android phones use `arm64-v8a`:
+
+```bash
+adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+```
+
+## Built with
+
+Pmug uses Jetpack Compose and Material 3 for its interface, Room for local reading data, PDFBox Android for PDF text extraction, Android `PdfRenderer` for page viewing, and Piper via sherpa-onnx for offline neural speech. Android system text-to-speech provides an additional playback option.
+
+## Project documentation
+
+- [Engineering notes](ENGINEERING.md)
+- [Design guide](DESIGN.md)
+- [Audio playback flow](AUDIO_FLOW.md)
+- [Developer and architecture guide](AGENTS.md)
