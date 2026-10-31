@@ -6,13 +6,13 @@ This document serves as the primary technical reference for developers and AI ag
 
 ## 1. Project Overview & Architecture
 
-**Pmug** is an Android academic PDF reader and text-to-speech companion app designed for distraction-free reading, bionic typography scanning, and audio playback powered by Gemini/OpenAI TTS through Puter.js, Piper offline neural TTS, and Android System TTS.
+**Pmug** is an Android academic PDF reader and text-to-speech companion app designed for distraction-free reading, bionic typography scanning, and audio playback powered by Piper offline neural TTS and Android System TTS.
 
 ### Core Stack
 * **UI**: Jetpack Compose with Material 3 design system (`PmugTokens`).
 * **Database**: Room Database (`PmugDatabase`, `PmugDao`) for documents, reading progress, and bookmarks.
 * **Document Engine**: PDFBox Android (`PdfTextExtractor`) for PDF extraction and Android `PdfRenderer` for PDF pages; `DocumentText` handles TXT, Markdown, and DOCX without a heavy document library.
-* **TTS Engine**: `HybridTtsEngine` orchestrating Piper offline neural voice, OpenAI GPT-4o mini TTS, or TTS-1-HD via Puter.js, with automatic fallback to offline `AndroidTtsEngine`; `TtsPrefetchQueue` remains a prototype and is not wired to synthesis/playback.
+* **TTS Engine**: `HybridTtsEngine` orchestrating Piper offline neural voice with automatic fallback to offline `AndroidTtsEngine`.
 * **Mascot**: Canvas/Vector drawn interactive companion (`PmugMug`).
 * **Background Processing**: WorkManager (`NudgeWorker`) for periodic reading habit check-ins.
 
@@ -28,8 +28,7 @@ app/src/main/java/com/example/
 │   ├── PmugDao.kt                       # DAO for Room DB operations
 │   ├── PmugEntities.kt                  # Entity models (PmugDocumentEntity, PmugProgressEntity, PmugBookmarkEntity)
 │   ├── PmugRepository.kt                # Repository layer for file imports, DB queries, SHA-256 hashing
-│   ├── ThumbnailCache.kt                # PDF page thumbnail renderer and cache wrapper
-│   └── model/                           # Data models (AcademicDocument, ParsedSentence, RetentionCard)
+│   └── ThumbnailCache.kt                # PDF page thumbnail renderer and cache wrapper
 ├── domain/
 │   ├── pdf/
 │   │   ├── PdfTextExtractor.kt          # PDFBox Android page-by-page text extraction and readability check
@@ -37,10 +36,9 @@ app/src/main/java/com/example/
 │   │   └── SentenceSplitter.kt          # Splits cleaned academic text into spoken & displayed sentence units
 │   ├── tts/
 │   │   ├── TtsEngine.kt                 # Common interface for text-to-speech engines
-│   │   ├── PuterTtsEngine.kt            # Activity-backed WebView bridge to Gemini/OpenAI TTS via Puter.js
 │   │   ├── AndroidTtsEngine.kt          # Built-in offline Android TextToSpeech engine
 │   │   ├── PiperFeatureManager.kt       # SplitInstall and reflective loader for Piper feature
-│   │   ├── HybridTtsEngine.kt           # Hybrid TTS manager with voice fallback and prefetch queue
+│   │   ├── HybridTtsEngine.kt           # Hybrid TTS manager with voice fallback
 │   │   ├── TtsPrefetchQueue.kt          # Bounded prefetch pipeline for gapless speech playback
 │   │   └── PmugTtsService.kt            # Foreground media playback service with audio focus and notifications
 │   └── retention/

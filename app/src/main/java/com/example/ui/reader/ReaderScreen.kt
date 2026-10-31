@@ -508,16 +508,6 @@ fun ReaderScreen(
                     // Voice Selection
                     var showVoiceMenu by remember { mutableStateOf(false) }
                     val hybridEngine = ttsEngine as? HybridTtsEngine
-                    var puterSignedIn by remember { mutableStateOf(hybridEngine?.puterSignedIn == true) }
-                    LaunchedEffect(showVoiceMenu, hybridEngine) {
-                        if (showVoiceMenu && hybridEngine != null) {
-                            hybridEngine.refreshPuterSignInStatus()
-                            while (showVoiceMenu) {
-                                puterSignedIn = hybridEngine.puterSignedIn
-                                delay(1000)
-                            }
-                        }
-                    }
 
                     Box {
                         IconButton(
@@ -527,33 +517,14 @@ fun ReaderScreen(
                             Icon(
                                 imageVector = Icons.Default.GraphicEq,
                                 contentDescription = "Voice Engine Selection",
-                                tint = if (currentProviderMode.isCloud) PmugTokens.Accent else PmugTokens.Ink
+                                tint = PmugTokens.Ink
                             )
                         }
                         DropdownMenu(
                             expanded = showVoiceMenu,
                             onDismissRequest = { showVoiceMenu = false }
                         ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(if (puterSignedIn) "Signed in to Puter" else "Sign in to Puter", fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            if (puterSignedIn) "Cloud voices are ready" else "Sign in to Puter to use cloud voices",
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                                            color = PmugTokens.MutedInk
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    if (!puterSignedIn) hybridEngine?.signInToPuter()
-                                },
-                                enabled = !puterSignedIn && hybridEngine != null
-                            )
                             listOf(
-                                TtsProviderMode.GEMINI_PUTER,
-                                TtsProviderMode.OPENAI_MINI_TTS,
-                                TtsProviderMode.OPENAI_TTS_HD,
                                 TtsProviderMode.PIPER_OFFLINE,
                                 TtsProviderMode.ANDROID_SYSTEM
                             ).forEach { mode ->
@@ -1348,7 +1319,7 @@ private fun ReaderBottomDock(
                     expanded = showSpeedMenu,
                     onDismissRequest = { showSpeedMenu = false }
                 ) {
-                    listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f).forEach { speed ->
+                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.7f).forEach { speed ->
                         DropdownMenuItem(
                             text = { Text("${speed}x" + if (speed == playbackSpeed) " ✓" else "") },
                             onClick = {

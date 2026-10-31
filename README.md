@@ -1,13 +1,13 @@
 # Pmug - Academic PDF Reader & Speech Companion
 
-Pmug is a focused Android app for reading and listening to academic papers and PDFs. It uses PDFBox Android for page-by-page text extraction, Gemini and OpenAI TTS through Puter.js, Android System Text-to-Speech, bionic reading typography, and an expressive mascot companion.
+Pmug is a focused Android app for reading and listening to academic papers and PDFs. It uses PDFBox Android for page-by-page text extraction, Piper offline neural text-to-speech, Android System Text-to-Speech, bionic reading typography, and an expressive mascot companion.
 
 ---
 
 ## Features
 
 * **Distraction-Free Reading**: Clean typography with bionic text formatting for faster scanning.
-* **Robust TTS Hierarchy**: Default offline Piper neural voice, OpenAI HD via Puter.js, and Android speech fallback. A prefetch queue prototype is present but is not yet connected to synthesis or playback.
+* **Robust TTS Hierarchy**: Default offline Piper neural voice and Android System speech fallback.
 * **Background Playback**: Foreground service media playback supporting notifications, audio focus, and headphone disconnect handling.
 * **Multi-format Library**: Imports PDF, plain text, Markdown, and DOCX. Text formats are paginated locally and retain page navigation.
 * **Reader Controls**: Selectable text, copy-page action, page jump, and PDF zoom that starts at 125% of fit-width.
@@ -52,6 +52,6 @@ Pmug is a focused Android app for reading and listening to academic papers and P
 * PDFBox Android extracts text page by page using PDF font mappings. Unreadable or image-only/scanned PDFs still display their rendered page, but are not spoken; scanned documents need OCR. TXT uses UTF-8 then Windows-1252 fallback. Markdown markup is stripped for speech; DOCX reads paragraphs from `word/document.xml` without Apache POI.
 * TXT and Markdown pages target about 2,000 characters and break at paragraph boundaries where possible. Non-PDF documents show a text-only reader. The library labels each format.
 * New PDFs start at 125% of fit-width scale; double-tap, pinch, and pan remain available. Reader text supports selection and copying, with a Copy page text action. Tap the page count to jump and prioritize extraction around that page.
-* Each play action sends one complete sentence to the selected speech engine. Android System Speech highlights the spoken word when the device reports word timing; cloud voices report sentence timing and the UI estimates word timing for the active highlight.
-* Default voice order: (1) Piper offline neural voice; (2) OpenAI HD via Puter (`tts-1-hd`, voice `alloy`); (3) Android System Speech. If a request fails, fallback occurs per sentence.
+* Each play action sends one complete sentence to the selected speech engine. Android System Speech highlights the spoken word when the device reports word timing; Piper reports sentence timing.
+* Default voice order: (1) Piper offline neural voice; (2) Android System Speech. If a request fails, fallback occurs per sentence.
 * Piper is powered by sherpa-onnx in the `:piper` on-demand feature module for release. Debug builds set `PIPER_BUNDLED_FOR_DEBUG` and compile the Piper source plus sherpa-onnx dependencies into the base APK. Selecting Piper downloads the Lessac medium model and pronunciation data to `files/tts/piper`.
