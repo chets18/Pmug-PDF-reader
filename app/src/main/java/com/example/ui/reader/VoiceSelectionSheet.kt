@@ -106,6 +106,7 @@ fun VoiceSelectionSheet(
             items(filteredVoices) { voice ->
                 val isSelected = voice.id == currentVoiceId
                 val isDownloading = downloadingVoiceId == voice.id
+                val isInstalled = ttsEngine.isPiperVoiceInstalled(voice.id)
 
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -129,7 +130,7 @@ fun VoiceSelectionSheet(
                                     color = PmugTokens.Ink
                                 )
                                 Text(
-                                    text = "Accent: ${voice.accent} · Quality: ${voice.quality} · Size: ~${voice.expectedDownloadSize / (1024*1024)}MB",
+                                    text = "Accent: ${voice.accent} · Quality: ${voice.quality} · ${if (isInstalled) "Downloaded" else "Size: ~${voice.expectedDownloadSize / (1024*1024)}MB"}",
                                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                                     color = PmugTokens.MutedInk
                                 )
@@ -163,7 +164,7 @@ fun VoiceSelectionSheet(
                             ) {
                                 Button(
                                     onClick = {
-                                        if (isSelected) {
+                                        if (isInstalled) {
                                             onSelectVoice(voice.id)
                                         } else {
                                             onDownloadVoice(voice)
@@ -177,16 +178,20 @@ fun VoiceSelectionSheet(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(
-                                        imageVector = if (isSelected) Icons.Default.Check else Icons.Default.Download,
+                                        imageVector = if (isInstalled) Icons.Default.Check else Icons.Default.Download,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = if (isSelected) "Active Voice" else "Download & Select")
+                                    Text(text = if (isSelected) "Active" else if (isInstalled) "Select" else "Download & Select")
                                 }
 
                                 IconButton(onClick = { onPreviewVoice(voice) }) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Preview voice", tint = PmugTokens.Accent)
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = "Preview voice",
+                                        tint = if (isInstalled) PmugTokens.Accent else PmugTokens.MutedInk.copy(alpha = 0.5f)
+                                    )
                                 }
 
                                 IconButton(onClick = { onDeleteVoice(voice.id) }) {

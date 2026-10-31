@@ -1102,8 +1102,19 @@ fun ReaderScreen(
                 },
                 onPreviewVoice = { voice ->
                     scope.launch {
-                        snackbarHostState.showSnackbar("Previewing ${voice.displayName}")
-                        ttsEngine.speakSentence(-1, "Previewing ${voice.displayName}.", 1.0f, 1.0f)
+                        if (hybridEngine == null) return@launch
+                        if (!hybridEngine.isPiperVoiceInstalled(voice.id)) {
+                            snackbarHostState.showSnackbar("Download ${voice.displayName} first to preview it.")
+                            return@launch
+                        }
+                        snackbarHostState.showSnackbar("Playing preview for ${voice.displayName}...")
+                        hybridEngine.setVoice(voice.id)
+                        val sampleAudio = hybridEngine.synthesizeAudio("This is a preview of the ${voice.displayName} voice in Pmug.", 1.0f)
+                        if (sampleAudio.samples.isNotEmpty()) {
+                            playAudioSamples(sampleAudio.samples, sampleAudio.sampleRate)
+                        } else {
+                            snackbarHostState.showSnackbar("Could not generate audio preview.")
+                        }
                     }
                 },
                 downloadingVoiceId = downloadingVoiceId,
@@ -1615,4 +1626,29 @@ private fun DisposableEffectWithLifecycle(
             }
         })
     }
+}
+
+private fun playAudioSamples(samples: FloatArray, sampleRate: Int) {
+    if (samples.isEmpty() || sampleRate <= 0) return
+    Thread {
+        try {
+            val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRate, android.media.AudioFormat.CHANNEL_OUT_MONO, android.media.AudioFormat.ENCODING_PCM_FLOAT)
+            val track = android.media.AudioTrack.Builder()
+                .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(android.media.AudioFormat.Builder().setEncoding(android.media.AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(sampleRate).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+                .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes((minBuf * 2).coerceAtLeast(8192))
+                .build()
+            track.play()
+            var offset = 0
+            while (offset < samples.size) {
+                val written = track.write(samples, offset, minOf(2048, samples.size - offset), android.media.AudioTrack.WRITE_BLOCKING)
+                if (written <= 0) break
+                offset += written
+            }
+            Thread.sleep(300)
+            track.stop()
+            track.release()
+        } catch (_: Exception) {}
+    }.start()
 }
